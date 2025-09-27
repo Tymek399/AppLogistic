@@ -32,6 +32,11 @@ public class VehicleController {
         List<Vehicle> cargo = vehicleRepository.findByTypeAndActive(Vehicle.VehicleType.CARGO, true);
         return ResponseEntity.ok(cargo);
     }
+    @PostMapping ("/cargo")
+    public ResponseEntity<Vehicle> createCargo(@RequestBody CreateTransportSetRequest createTransportSetRequest) {
+        Vehicle vehicle = new Vehicle();
+        return ResponseEntity.ok(vehicleRepository.save(vehicle));
+    }
 
     @GetMapping("/transport-sets")
     @PreAuthorize("hasRole('OPERATOR')")
