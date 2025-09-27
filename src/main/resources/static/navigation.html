@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="pl" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nawigacja - Trasa <span th:text="${route?.id ?: 'N/A'}">ID</span></title>
+    <script th:src="'https://maps.googleapis.com/maps/api/js?key=' + ${googleMapsKey} + '&libraries=geometry'"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #map { height: 70vh; border-radius: 8px; }
+        .status-online { color: #28a745; }
+        .status-offline { color: #dc3545; }
+        .route-info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .controls { padding: 15px; background: white; border-radius: 8px; }
+        .back-button { position: fixed; top: 20px; left: 20px; z-index: 1000; }
+    </style>
+</head>
+<body>
+<div class="back-button">
+    <a href="/driver-dashboard.html" class="btn btn-secondary">← Powrót do Dashboard</a>
+</div>
+
+<div class="container-fluid p-3">
+    <div class="route-info">
+        <h2>Trasa: <span th:text="${route?.startAddress ?: 'N/A'}">Start</span> → <span th:text="${route?.endAddress ?: 'N/A'}">End</span></h2>
+        <div class="row">
+            <div class="col-md-3">
+                <span id="connection-status" class="status-offline">Łączenie z GPS...</span>
+            </div>
+            <div class="col-md-3">
+                <span id="accuracy">Dokładność: --</span>
+            </div>
+            <div class="col-md-3">
+                <span id="speed">Prędkość: -- km/h</span>
+            </div>
+            <div class="col-md-3">
+                <span id="battery">Bateria: --%</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="controls mt-3">
+        <div class="row">
+            <div class="col-md-8">
+                <button id="start-tracking" class="btn btn-success btn-lg me-2">Start Nawigacji</button>
+                <button id="stop-tracking" class="btn btn-danger btn-lg me-2" disabled>Stop</button>
+                <button id="center-map" class="btn btn-info btn-lg">Centruj Mapę</button>
+            </div>
+            <div class="col-md-4 text-end">
+                <a th:href="@{'/api/routes/' + ${route?.id} + '/navigation-file?format=gpx'}"
+                   class="btn btn-outline-primary me-2">Pobierz GPX</a>
+                <a th:href="@{'/api/routes/' + ${route?.id} + '/navigation-file?format=kml'}"
+                   class="btn btn-outline-primary">Pobierz KML</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script th:inline="javascript">
+    // Pobieranie danych z serwera (Thymeleaf)
+    const routeId = /*[[${route?.id}]]*/ null;
+    const routeData = /*[[${route?.routeDataJson}]]*/ '{}';
+    const startLat = /*[[${route?.startLatitude}]]*/ 52.2297;
+    const startLng = /*[[${route?.startLongitude}]]*/ 21.0122;
+    const endLat = /*[[${route?.endLatitude}]]*/ 52.4064;
+    const endLng = /*[[${route?.endLongitude}]]*/ 16.9252;
+    const startAddress = /*[[${route?.startAddress}]]*/ 'Start';
+    const endAddress = /*[[${route?.endAddress}]]*/ 'End';
+
+    let map;
+    let watchId;
+    let isTracking = false;
+    let currentPosition = null;
+    let routePolyline = null;
+    let currentMarker = null;
+    const token = localStorage.getItem('token');
+
+    // Sprawdź czy user jest zalogowany
+    if (!token) {
+        window.location.href = '/login.html';
+    }
+
+    // Sprawdź czy mamy dane trasy
+    if (!routeId) {
+        alert('Brak danych trasy. Przekierowanie do dashboard.');
+        window.location.href = '/driver-dashboard.html';
+    }
+
+    function initNavigation() {
+        setupAuth();
+        initMap();
+        setupTrackingControls();
+    }
+
+    function setupAuth() {
+        // Dodanie nagłówka autoryzacji do wszystkich requestów
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            if (args[1]) {
+                args[1].headers = {
+                    ...args[1].headers,
+                    'Authorization': `Bearer ${token}`
+                };
+            } else {
+                args[1] = {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                };
+            }
+            return originalFetch.apply(this, args);
+        };
+    }
+
+    function initMap() {
+        // Inicjalizacja mapy z centrum na trasie
+        const centerLat = (startLat + endLat) / 2;
+        const centerLng = (startLng + endLng) / 2;
+
+        map = new google.maps.Map(document.getElementById('map'), {
+            zoom: 10,
+            center: { lat: centerLat, lng: centerLng }
+        });
+
+        // Znacznik startu
+        new google.maps.Marker({
+            position: { lat: startLat, lng: startLng },
+            map: map,
+            title: `Start: ${startAddress}`,
+            icon: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png'
+        });
+
+        // Znacznik końca
+        new google.maps.Marker({
+            position: { lat: endLat, lng: endLng },
+            map: map,
+            title: `Koniec: ${endAddress}`,
+            icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+        });
+
+        // Linia trasy
+        routePolyline = new google.maps.Polyline({
+            path: [
+                { lat: startLat, lng: startLng },
+                { lat: endLat, lng: endLng }
+            ],
+            geodesic: true,
+            strokeColor: '#FF0000',
+            strokeOpacity: 1.0,
+            strokeWeight: 3
+        });
+        routePolyline.setMap(map);
+
+        // Dopasowanie mapy do granic trasy
+        const bounds = new google.maps.LatLngBounds();
+        bounds.extend({ lat: startLat, lng: startLng });
+        bounds.extend({ lat: endLat, lng: endLng });
+        map.fitBounds(bounds);
+    }
+
+    function setupTrackingControls() {
+        document.getElementById('start-tracking').addEventListener('click', startTracking);
+        document.getElementById('stop-tracking').addEventListener('click', stopTracking);
+        document.getElementById('center-map').addEventListener('click', centerMapOnPosition);
+    }
+
+    function startTracking() {
+        if (!navigator.geolocation) {
+            alert('Geolokalizacja nie jest obsługiwana przez tę przeglądarkę.');
+            return;
+        }
+
+        document.getElementById('connection-status').textContent = 'Łączenie...';
+        document.getElementById('connection-status').className = 'status-offline';
+
+        // Logowanie do sesji trackingu
+        fetch(`/api/tracking/login?routeId=${routeId}`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        })
+            .then(response => {
+                if (response.ok) {
+                    // Uruchomienie śledzenia GPS
+                    watchId = navigator.geolocation.watchPosition(
+                        sendPosition,
+                        handleError,
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 5000
+                        }
+                    );
+                    isTracking = true;
+                    document.getElementById('start-tracking').disabled = true;
+                    document.getElementById('stop-tracking').disabled = false;
+                    document.getElementById('connection-status').textContent = 'GPS Aktywny';
+                    document.getElementById('connection-status').className = 'status-online';
+                } else {
+                    throw new Error('Błąd logowania do sesji');
+                }
+            })
+            .catch(error => {
+                console.error('Error starting tracking:', error);
+                document.getElementById('connection-status').textContent = 'Błąd logowania';
+                document.getElementById('connection-status').className = 'status-offline';
+                alert('Nie można uruchomić nawigacji. Sprawdź połączenie.');
+            });
+    }
+
+    function sendPosition(position) {
+        const positionData = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            speedKmh: position.coords.speed ? position.coords.speed * 3.6 : 0,
+            accuracy: position.coords.accuracy,
+            batteryLevel: null, // Będzie ustawione asynchronicznie
+            timestamp: new Date().toISOString()
+        };
+
+        // Próba pobrania poziomu baterii (jeśli dostępne)
+        if ('getBattery' in navigator) {
+            navigator.getBattery().then(battery => {
+                positionData.batteryLevel = Math.round(battery.level * 100);
+                document.getElementById('battery').textContent = `Bateria: ${positionData.batteryLevel}%`;
+            });
+        }
+
+        // Wysłanie pozycji na backend
+        fetch('/api/tracking/position', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(positionData)
+        })
+            .catch(error => console.error('Error sending position:', error));
+
+        // Aktualizacja UI i mapy
+        updateUI(positionData);
+        updateMapPosition(positionData);
+    }
+
+    function updateUI(position) {
+        document.getElementById('speed').textContent = `Prędkość: ${Math.round(position.speedKmh)} km/h`;
+        document.getElementById('accuracy').textContent = `Dokładność: ${Math.round(position.accuracy)}m`;
+    }
+
+    function updateMapPosition(position) {
+        currentPosition = { lat: position.latitude, lng: position.longitude };
+
+        // Usunięcie starego znacznika
+        if (currentMarker) {
+            currentMarker.setMap(null);
+        }
+
+        // Dodanie znacznika aktualnej pozycji
+        currentMarker = new google.maps.Marker({
+            position: currentPosition,
+            map: map,
+            title: 'Twoja pozycja',
+            icon: {
+                url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+                scaledSize: new google.maps.Size(32, 32)
+            }
+        });
+    }
+
+    function centerMapOnPosition() {
+        if (currentPosition) {
+            map.setCenter(currentPosition);
+            map.setZoom(16);
+        } else {
+            alert('Brak danych o aktualnej pozycji.');
+        }
+    }
+
+    function stopTracking() {
+        if (watchId) {
+            navigator.geolocation.clearWatch(watchId);
+
+            fetch('/api/tracking/logout', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            isTracking = false;
+            document.getElementById('start-tracking').disabled = false;
+            document.getElementById('stop-tracking').disabled = true;
+            document.getElementById('connection-status').textContent = 'GPS Nieaktywny';
+            document.getElementById('connection-status').className = 'status-offline';
+        }
+    }
+
+    function handleError(error) {
+        let message = 'Błąd GPS: ';
+        switch(error.code) {
+            case error.PERMISSION_DENIED:
+                message += 'Dostęp do geolokalizacji został odrzucony.';
+                break;
+            case error.POSITION_UNAVAILABLE:
+                message += 'Informacje o lokalizacji są niedostępne.';
+                break;
+            case error.TIMEOUT:
+                message += 'Żądanie lokalizacji przekroczyło limit czasu.';
+                break;
+            default:
+                message += 'Wystąpił nieznany błąd.';
+                break;
+        }
+        document.getElementById('connection-status').textContent = message;
+        document.getElementById('connection-status').className = 'status-offline';
+    }
+
+    // Auto-logout przy zamknięciu strony
+    window.addEventListener('beforeunload', () => {
+        if (isTracking) {
+            navigator.sendBeacon('/api/tracking/logout', JSON.stringify({}));
+        }
+    });
+
+    // Inicjalizacja po załadowaniu strony
+    window.addEventListener('load', initNavigation);
+</script>
+</body>
+</html>

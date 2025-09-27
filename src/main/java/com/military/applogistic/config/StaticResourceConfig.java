@@ -1,0 +1,25 @@
+package com.military.applogistic.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.CacheControl;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class StaticResourceConfig implements WebMvcConfigurer {
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        // Obsługa wszystkich zasobów statycznych
+        registry.addResourceHandler("/**")
+                .addResourceLocations("classpath:/static/")
+                .setCacheControl(CacheControl.noCache());
+    }
+
+    @Override
+    public void addViewControllers(ViewControllerRegistry registry) {
+        // Mapowanie głównej strony
+        registry.addViewController("/").setViewName("forward:/index.html");
+    }
+}

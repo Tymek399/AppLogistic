@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Kierowcy - LogisticOps</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .route-card {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+        .route-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .route-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        .status-created { background: #e9ecef; color: #495057; }
+        .status-assigned { background: #d1ecf1; color: #0c5460; }
+        .status-active { background: #d4edda; color: #155724; }
+        .status-completed { background: #f8d7da; color: #721c24; }
+        .no-routes {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .spinner-container {
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-dark bg-dark">
+    <div class="container-fluid">
+        <span class="navbar-brand">LogisticOps - Dashboard Kierowcy</span>
+        <div>
+            <span class="text-light me-3">Witaj, <span id="username">Kierowca</span></span>
+            <button class="btn btn-outline-light" onclick="logout()">Wyloguj</button>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Moje Trasy</h2>
+                <button class="btn btn-primary" onclick="loadRoutes()">
+                    <span id="refresh-icon">🔄</span> Odśwież
+                </button>
+            </div>
+
+            <div id="routes-container">
+                <div class="spinner-container">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Ładowanie...</span>
+                    </div>
+                    <p class="mt-2">Ładowanie tras...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const token = localStorage.getItem('token');
+    const username = localStorage.getItem('username');
+
+    // Inicjalizacja dashboard
+    document.addEventListener('DOMContentLoaded', function() {
+        // Sprawdź autoryzację
+        if (!token) {
+            window.location.href = '/login.html';
+            return;
+        }
+
+        // Ustaw nazwę użytkownika
+        if (username) {
+            document.getElementById('username').textContent = username;
+        }
+
+        setupAuth();
+        loadRoutes();
+    });
+
+    function setupAuth() {
+        // Dodanie nagłówka autoryzacji do wszystkich requestów
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            if (args[1]) {
+                args[1].headers = {
+                    ...args[1].headers,
+                    'Authorization': `Bearer ${token}`
+                };
+            } else {
+                args[1] = {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                };
+            }
+            return originalFetch.apply(this, args);
+        };
+    }
+
+    function loadRoutes() {
+        const refreshIcon = document.getElementById('refresh-icon');
+        refreshIcon.style.animation = 'spin 1s linear infinite';
+
+        fetch('/api/routes/my-routes')
+            .then(response => {
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // Token wygasł
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('username');
+                        window.location.href = '/login.html';
+                        return;
+                    }
+                    throw new Error(`HTTP ${response.status}: Nie udało się załadować tras`);
+                }
+                return response.json();
+            })
+            .then(routes => {
+                displayRoutes(routes);
+            })
+            .catch(error => {
+                console.error('Error loading routes:', error);
+                displayError(error.message || 'Błąd podczas ładowania tras');
+            })
+            .finally(() => {
+                refreshIcon.style.animation = '';
+            });
+    }
+
+    function displayRoutes(routes) {
+        const container = document.getElementById('routes-container');
+
+        if (!routes || routes.length === 0) {
+            container.innerHTML = `
+                <div class="no-routes">
+                    <h4>Brak przypisanych tras</h4>
+                    <p>Skontaktuj się z operatorem w celu przypisania tras.</p>
+                    <button class="btn btn-outline-primary mt-2" onclick="loadRoutes()">
+                        Sprawdź ponownie
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = routes.map(route => `
+            <div class="route-card">
+                <div class="row">
+                    <div class="col-md-8">
+                        <h5>Trasa #${route.id}</h5>
+                        <p class="mb-1"><strong>🚩 Start:</strong> ${route.startAddress}</p>
+                        <p class="mb-1"><strong>🏁 Koniec:</strong> ${route.endAddress}</p>
+                        <div class="row mt-2">
+                            <div class="col-md-4">
+                                <small class="text-muted">Dystans: ${route.totalDistanceKm ? route.totalDistanceKm.toFixed(1) : 'N/A'} km</small>
+                            </div>
+                            <div class="col-md-4">
+                                <small class="text-muted">Czas: ${route.estimatedTimeMinutes ? Math.round(route.estimatedTimeMinutes) : 'N/A'} min</small>
+                            </div>
+                            <div class="col-md-4">
+                                <span class="route-status status-${route.status.toLowerCase()}">${getStatusText(route.status)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <div class="btn-group-vertical" role="group">
+                            ${getNavigationButton(route)}
+                            ${getDownloadButtons(route)}
+                        </div>
+                    </div>
+                </div>
+                ${getWarningsSection(route)}
+            </div>
+        `).join('');
+    }
+
+    function getNavigationButton(route) {
+        if (route.status === 'ASSIGNED' || route.status === 'ACTIVE') {
+            return `<button class="btn btn-success mb-2" onclick="startNavigation(${route.id})">
+                        🧭 Nawiguj
+                    </button>`;
+        }
+        return '';
+    }
+
+    function getDownloadButtons(route) {
+        return `
+            <a href="/api/routes/${route.id}/navigation-file?format=gpx"
+               class="btn btn-outline-primary btn-sm mb-1"
+               download="route_${route.id}.gpx">
+                📱 Pobierz GPX
+            </a>
+            <a href="/api/routes/${route.id}/navigation-file?format=kml"
+               class="btn btn-outline-secondary btn-sm"
+               download="route_${route.id}.kml">
+                🗺️ Pobierz KML
+            </a>
+        `;
+    }
+
+    function getWarningsSection(route) {
+        if (route.hasRestrictions || (route.warnings && route.warnings.length > 0)) {
+            const warnings = route.warnings || [];
+            return `
+                <div class="alert alert-warning mt-3 mb-0">
+                    <strong>⚠️ Ostrzeżenia:</strong>
+                    <ul class="mb-0 mt-1">
+                        ${warnings.map(warning => `<li>${warning}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+        return '';
+    }
+
+    function startNavigation(routeId) {
+        // Przekierowanie na stronę nawigacji z konkretną trasą
+        window.location.href = `/navigation/${routeId}`;
+    }
+
+    function getStatusText(status) {
+        const statusMap = {
+            'CREATED': 'Utworzona',
+            'ASSIGNED': 'Przypisana',
+            'ACTIVE': 'Aktywna',
+            'COMPLETED': 'Ukończona'
+        };
+        return statusMap[status] || status;
+    }
+
+    function displayError(message) {
+        const container = document.getElementById('routes-container');
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <h5>Błąd</h5>
+                <p>${message}</p>
+                <button class="btn btn-danger" onclick="loadRoutes()">
+                    Spróbuj ponownie
+                </button>
+            </div>
+        `;
+    }
+
+    function logout() {
+        if (confirm('Czy na pewno chcesz się wylogować?')) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            window.location.href = '/login.html';
+        }
+    }
+
+    // Dodajemy CSS dla animacji odświeżania
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    `;
+    document.head.appendChild(style);
+</script>
+</body>
+</html>

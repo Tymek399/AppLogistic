@@ -1,0 +1,272 @@
+/* Main Styles for LogisticOps */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+}
+
+/* Login Page Styles */
+.login-container {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    max-width: 400px;
+    margin: auto;
+}
+
+.login-header {
+    background: #2c3e50;
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
+
+.login-body {
+    padding: 40px;
+}
+
+.btn-login {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    padding: 12px;
+    font-weight: bold;
+}
+
+/* Dashboard Styles */
+.navbar-brand {
+    font-weight: bold;
+}
+
+.route-card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 15px;
+    transition: all 0.3s ease;
+    background: white;
+}
+
+.route-card:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.route-status {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.9em;
+    font-weight: bold;
+    display: inline-block;
+}
+
+.status-created {
+    background: #e9ecef;
+    color: #495057;
+}
+
+.status-assigned {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.status-active {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-completed {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* Operator Dashboard Styles */
+.route-creator {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border: 1px solid #dee2e6;
+}
+
+.active-drivers {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.driver-card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 10px;
+    background: #f8f9fa;
+}
+
+.driver-online {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.driver-offline {
+    color: #dc3545;
+    font-weight: bold;
+}
+
+/* Navigation Styles */
+#map {
+    height: 70vh;
+    border-radius: 8px;
+    border: 2px solid #dee2e6;
+}
+
+.status-online {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.status-offline {
+    color: #dc3545;
+    font-weight: bold;
+}
+
+.route-info {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    border: 1px solid #dee2e6;
+}
+
+.controls {
+    padding: 15px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.back-button {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+}
+
+/* Utility Styles */
+.spinner-container {
+    text-align: center;
+    padding: 40px;
+}
+
+.no-routes {
+    text-align: center;
+    padding: 60px 20px;
+    color: #6c757d;
+}
+
+.refresh-indicator {
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+/* Animations */
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.spinning {
+    animation: spin 1s linear infinite;
+}
+
+/* Hero page styles */
+.hero-container {
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    max-width: 900px;
+    margin: auto;
+}
+
+.hero-header {
+    background: #2c3e50;
+    color: white;
+    padding: 60px 40px;
+    text-align: center;
+}
+
+.hero-body {
+    padding: 40px;
+}
+
+.feature-card {
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: transform 0.3s ease;
+}
+
+.feature-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+}
+
+.btn-hero {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    padding: 15px 30px;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+/* Loading states */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.btn.loading {
+    position: relative;
+}
+
+.btn.loading::after {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    margin: auto;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .hero-header {
+        padding: 40px 20px;
+    }
+
+    .hero-body {
+        padding: 20px;
+    }
+
+    .login-body {
+        padding: 20px;
+    }
+
+    .route-card {
+        padding: 15px;
+    }
+
+    .back-button {
+        position: static;
+        margin-bottom: 15px;
+    }
+
+    #map {
+        height: 50vh;
+    }
+}

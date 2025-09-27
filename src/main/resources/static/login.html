@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogisticOps - Logowanie</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+        }
+        .login-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .login-header {
+            background: #2c3e50;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .login-body {
+            padding: 40px;
+        }
+        .btn-login {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px;
+            font-weight: bold;
+        }
+        .form-floating label {
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-4">
+            <div class="login-container">
+                <div class="login-header">
+                    <h2>🚚 LogisticOps</h2>
+                    <p class="mb-0">System Logistyki Militarnej</p>
+                </div>
+                <div class="login-body">
+                    <form id="login-form">
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="username" placeholder="Nazwa użytkownika" required>
+                            <label for="username">Nazwa użytkownika</label>
+                        </div>
+                        <div class="form-floating mb-4">
+                            <input type="password" class="form-control" id="password" placeholder="Hasło" required>
+                            <label for="password">Hasło</label>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-login w-100">Zaloguj się</button>
+                    </form>
+
+                    <div id="error-message" class="alert alert-danger mt-3" style="display: none;"></div>
+
+                    <div class="mt-4 text-center">
+                        <small class="text-muted">
+                            <strong>Demo konta:</strong><br>
+                            Operator: operator / password123<br>
+                            Kierowca: driver / password123
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('login-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const errorDiv = document.getElementById('error-message');
+
+        // Reset błędu
+        errorDiv.style.display = 'none';
+
+        // Loading state
+        const submitBtn = document.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Logowanie...';
+        submitBtn.disabled = true;
+
+        fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ username, password })
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Nieprawidłowe dane logowania');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Token + username do localStorage
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('username', data.username);
+
+                // ✅ Stałe przekierowania do plików .html
+                if (username.includes('operator') || username === 'admin') {
+                    window.location.href = 'operator-dashboard.html';
+                } else {
+                    window.location.href = 'driver-dashboard.html';
+                }
+            })
+            .catch(error => {
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            })
+            .finally(() => {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            });
+    });
+
+    // ✅ Auto redirect jeśli user zalogowany
+    if (localStorage.getItem('token')) {
+        const username = localStorage.getItem('username');
+        if (username && (username.includes('operator') || username === 'admin')) {
+            window.location.href = 'operator-dashboard.html';
+        } else {
+            window.location.href = 'driver-dashboard.html';
+        }
+    }
+</script>
+</body>
+</html>
