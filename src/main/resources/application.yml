@@ -42,7 +42,7 @@ spring:
     prefix: classpath:/templates/
     suffix: .html
     cache: false
-    mode: HTML5
+    mode: HTML
     encoding: UTF-8
 
 # API Keys
@@ -53,7 +53,7 @@ api:
     enabled: true
     base-url: https://maps.googleapis.com/maps/api
   here-maps:
-    key: Gf-TtmVV8nyo6-9tc6QYw4twU2cVA-jE58SxM2jw3po  # Zastąp prawdziwym kluczem
+    key: Gf-TtmVV8nyo6-9tc6QYw4twU2cVA-jE58SxM2jw3po
     enabled: true
     base-url: https://router.hereapi.com/v8
 # JWT
