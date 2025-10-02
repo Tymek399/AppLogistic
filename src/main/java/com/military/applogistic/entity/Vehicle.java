@@ -22,6 +22,10 @@ public class Vehicle {
     private Integer maxAxleLoadKg;
     private Boolean active = true;
 
+    // NOWE POLA
+    private Boolean canDriveAlone = false; // Czy może jechać solo bez naczepy
+    private String vehicleCategory; // "TRUCK", "MILITARY_VEHICLE", "STANDALONE"
+
     public enum VehicleType {
         TRANSPORTER, CARGO
     }

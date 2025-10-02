@@ -1,9 +1,11 @@
-// operator.js - Operator Dashboard for Real Google Maps Integration
+// operator.js - Kompletny dashboard operatora
 class OperatorDashboard {
     constructor() {
         this.token = localStorage.getItem('token');
         this.username = localStorage.getItem('username');
         this.map = null;
+        this.directionsService = null;
+        this.directionsRenderer = null;
         this.driverMarkers = {};
         this.transportSets = [];
         this.activeDrivers = [];
@@ -60,17 +62,28 @@ class OperatorDashboard {
         try {
             this.map = new window.google.maps.Map(mapContainer, {
                 zoom: 6,
-                center: { lat: 52.0693, lng: 19.4803 }, // Poland center
+                center: { lat: 52.0693, lng: 19.4803 },
                 mapTypeControl: true,
                 streetViewControl: false,
                 fullscreenControl: true,
                 zoomControl: true
             });
 
-            this.mapInitialized = true;
-            console.log('Google Maps initialized successfully');
+            this.directionsService = new window.google.maps.DirectionsService();
+            this.directionsRenderer = new window.google.maps.DirectionsRenderer({
+                suppressMarkers: false,
+                draggable: false,
+                polylineOptions: {
+                    strokeColor: '#667eea',
+                    strokeWeight: 5,
+                    strokeOpacity: 0.8
+                }
+            });
+            this.directionsRenderer.setMap(this.map);
 
-            // Setup autocomplete after map initialization
+            this.mapInitialized = true;
+            console.log('Google Maps initialized');
+
             this.setupAddressAutocomplete();
 
         } catch (error) {
@@ -80,7 +93,6 @@ class OperatorDashboard {
 
     setupAddressAutocomplete() {
         if (!window.google || !window.google.maps || !window.google.maps.places) {
-            console.error('Google Places API not available');
             return;
         }
 
@@ -98,7 +110,7 @@ class OperatorDashboard {
                 startAutocomplete.addListener('place_changed', () => {
                     const place = startAutocomplete.getPlace();
                     if (place.geometry && place.geometry.location) {
-                        console.log('Start place selected:', place.formatted_address);
+                        this.showRoutePreview();
                     }
                 });
             }
@@ -113,12 +125,10 @@ class OperatorDashboard {
                 endAutocomplete.addListener('place_changed', () => {
                     const place = endAutocomplete.getPlace();
                     if (place.geometry && place.geometry.location) {
-                        console.log('End place selected:', place.formatted_address);
+                        this.showRoutePreview();
                     }
                 });
             }
-
-            console.log('Address autocomplete initialized successfully');
         } catch (error) {
             console.error('Error setting up autocomplete:', error);
         }
@@ -130,9 +140,9 @@ class OperatorDashboard {
             routeForm.addEventListener('submit', (e) => this.handleRouteSubmit(e));
         }
 
-        const refreshDriversBtn = document.getElementById('refresh-drivers');
+        const refreshDriversBtn = document.getElementById('refresh-drivers-list');
         if (refreshDriversBtn) {
-            refreshDriversBtn.addEventListener('click', () => this.updateDriverPositions());
+            refreshDriversBtn.addEventListener('click', () => this.loadDriversList());
         }
 
         const refreshRoutesBtn = document.getElementById('refresh-routes');
@@ -144,20 +154,53 @@ class OperatorDashboard {
         if (centerMapBtn) {
             centerMapBtn.addEventListener('click', () => this.centerMapOnPoland());
         }
+
+        const startAddr = document.getElementById('start-address');
+        const endAddr = document.getElementById('end-address');
+        if (startAddr) startAddr.addEventListener('blur', () => this.showRoutePreview());
+        if (endAddr) endAddr.addEventListener('blur', () => this.showRoutePreview());
+    }
+
+    async showRoutePreview() {
+        const startAddr = document.getElementById('start-address')?.value;
+        const endAddr = document.getElementById('end-address')?.value;
+
+        if (!startAddr || !endAddr || !this.directionsService || !this.directionsRenderer) {
+            return;
+        }
+
+        try {
+            const request = {
+                origin: startAddr + ', Polska',
+                destination: endAddr + ', Polska',
+                travelMode: window.google.maps.TravelMode.DRIVING,
+                unitSystem: window.google.maps.UnitSystem.METRIC,
+                avoidHighways: false,
+                avoidTolls: true,
+                provideRouteAlternatives: false
+            };
+
+            this.directionsService.route(request, (result, status) => {
+                if (status === 'OK') {
+                    this.directionsRenderer.setDirections(result);
+                }
+            });
+
+        } catch (error) {
+            console.error('Error showing route preview:', error);
+        }
     }
 
     async loadTransportSets() {
         try {
             const response = await fetch('/api/vehicles/transport-sets');
-            if (!response.ok) {
-                throw new Error('Failed to load transport sets');
-            }
+            if (!response.ok) throw new Error('Failed to load transport sets');
 
             this.transportSets = await response.json();
             this.populateTransportSetsSelect();
         } catch (error) {
             console.error('Error loading transport sets:', error);
-            this.showError('Błąd podczas ładowania zestawów transportowych');
+            this.showError('Błąd podczas ładowania zestawów');
         }
     }
 
@@ -170,7 +213,11 @@ class OperatorDashboard {
         this.transportSets.forEach(set => {
             const option = document.createElement('option');
             option.value = set.id;
-            option.textContent = `${set.transporter.model} + ${set.cargo.model} (${set.totalWeightKg}kg, ${set.totalHeightCm}cm)`;
+            const heightTotal = set.totalHeightCm || 0;
+            const heightTrailer = set.trailerHeightCm || 0;
+            const heightCargo = set.cargo?.heightCm || 0;
+            option.textContent = `${set.transporter.model} + ${set.cargo.model} ` +
+                `(${set.totalWeightKg}kg, ${heightTotal}cm = naczepa ${heightTrailer}cm + ładunek ${heightCargo}cm)`;
             select.appendChild(option);
         });
     }
@@ -179,219 +226,279 @@ class OperatorDashboard {
         const container = document.getElementById('routes-list');
         if (!container) return;
 
-        container.innerHTML = `
-            <div class="text-center p-4">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Ładowanie...</span>
-                </div>
-                <p class="mt-2">Ładowanie tras...</p>
-            </div>
-        `;
+        container.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div></div>';
 
         try {
             const response = await fetch('/api/routes/all');
-            if (!response.ok) {
-                throw new Error('Failed to load routes');
-            }
+            if (!response.ok) throw new Error('Failed to load routes');
 
             this.routes = await response.json();
             this.displayRoutes();
         } catch (error) {
             console.error('Error loading routes:', error);
-            container.innerHTML = `
-                <div class="alert alert-danger">
-                    <h5>Błąd</h5>
-                    <p>Nie udało się załadować tras: ${error.message}</p>
-                    <button class="btn btn-danger" onclick="operatorDashboard.loadAllRoutes()">
-                        Spróbuj ponownie
-                    </button>
-                </div>
-            `;
+            container.innerHTML = `<div class="alert alert-danger">Błąd: ${error.message}</div>`;
         }
     }
 
     displayRoutes() {
-        const routesContainer = document.getElementById('routes-list');
-        if (!routesContainer) return;
+        const container = document.getElementById('routes-list');
+        if (!container) return;
 
         if (this.routes.length === 0) {
-            routesContainer.innerHTML = `
-                <div class="text-center p-4">
-                    <h4>Brak tras w systemie</h4>
-                    <p class="text-muted">Utwórz pierwszą trasę używając formularza obok</p>
-                </div>
-            `;
+            container.innerHTML = '<div class="text-center p-4"><h4>Brak tras</h4></div>';
             return;
         }
 
-        routesContainer.innerHTML = this.routes.map(route => `
+        container.innerHTML = this.routes.map(route => `
             <div class="route-card mb-3 card">
-                <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="card-header d-flex justify-content-between">
                     <h6 class="mb-0">Trasa #${route.id}</h6>
-                    <span class="route-status status-${route.status.toLowerCase()}">${this.getStatusText(route.status)}</span>
+                    <span class="badge bg-primary">${route.status}</span>
                 </div>
                 <div class="card-body">
                     <p><strong>Start:</strong> ${route.startAddress}</p>
                     <p><strong>Koniec:</strong> ${route.endAddress}</p>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <small>Dystans: ${route.totalDistanceKm ? route.totalDistanceKm.toFixed(1) : 'N/A'} km</small>
-                        </div>
-                        <div class="col-md-4">
-                            <small>Czas: ${route.estimatedTimeMinutes || 'N/A'} min</small>
-                        </div>
-                        <div class="col-md-4">
-                            <small>Kierowca: ${route.assignedDriver || 'Brak'}</small>
-                        </div>
-                    </div>
                     ${this.getRouteWarnings(route)}
-                    <div class="mt-2">
-                        ${this.getRouteActions(route)}
-                    </div>
+                    <button class="btn btn-sm btn-info" onclick="operatorDashboard.showValidationDetails(${route.id})">
+                        Szczegóły walidacji
+                    </button>
+                    ${route.status === 'CREATED' ? `
+                        <button class="btn btn-sm btn-primary" onclick="operatorDashboard.showAssignDriverModal(${route.id})">
+                            Przypisz kierowcę
+                        </button>
+                    ` : ''}
                 </div>
             </div>
         `).join('');
     }
 
     getRouteWarnings(route) {
-        if (route.hasRestrictions || (route.warnings && route.warnings.length > 0)) {
-            const warnings = route.warnings || [];
-            return `
-                <div class="alert alert-warning alert-sm mt-2">
-                    <strong>Ostrzeżenia infrastruktury:</strong>
-                    <ul class="mb-0 small">
-                        ${warnings.map(w => `<li>${w}</li>`).join('')}
-                    </ul>
-                </div>
-            `;
+        if (route.warnings && route.warnings.length > 0) {
+            return `<div class="alert alert-warning"><ul class="mb-0">${route.warnings.map(w => `<li>${w}</li>`).join('')}</ul></div>`;
         }
         return '';
     }
 
-    getRouteActions(route) {
-        let actions = '';
+    async showValidationDetails(routeId) {
+        try {
+            const response = await fetch(`/api/routes/${routeId}/validation-details`);
+            if (!response.ok) throw new Error('Failed');
 
-        if (route.status === 'CREATED') {
-            actions += `
-                <button class="btn btn-sm btn-primary me-2" onclick="operatorDashboard.showAssignDriverModal(${route.id})">
-                    Przypisz kierowcę
-                </button>
-            `;
+            const data = await response.json();
+
+            let html = '<div class="modal" style="display:block;background:rgba(0,0,0,0.5);position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;">';
+            html += '<div class="modal-dialog modal-lg"><div class="modal-content">';
+            html += '<div class="modal-header"><h5>Walidacja trasy #' + routeId + '</h5>';
+            html += '<button class="btn-close" onclick="this.closest(\'.modal\').remove()"></button></div>';
+            html += '<div class="modal-body">';
+
+            if (data.validationAvailable) {
+                if (data.transportSetInfo) {
+                    html += '<h6>Parametry zestawu:</h6><ul>';
+                    html += `<li>Wysokość: ${data.transportSetInfo.totalHeight_cm}cm `;
+                    if (data.transportSetInfo.trailerHeight_cm) {
+                        html += `(naczepa ${data.transportSetInfo.trailerHeight_cm}cm + ładunek ${data.transportSetInfo.cargoHeight_cm}cm)`;
+                    }
+                    html += '</li>';
+                    html += `<li>Waga: ${data.transportSetInfo.totalWeight_kg}kg</li></ul>`;
+                }
+
+                if (data.violations && data.violations.length > 0) {
+                    html += '<h6>Naruszenia:</h6><ul>';
+                    data.violations.forEach(v => html += `<li>${v}</li>`);
+                    html += '</ul>';
+                }
+
+                if (data.restrictions && data.restrictions.length > 0) {
+                    html += '<h6>Ograniczenia:</h6><ul>';
+                    data.restrictions.forEach(r => html += `<li>${r}</li>`);
+                    html += '</ul>';
+                }
+            } else {
+                html += '<p>Brak danych walidacji</p>';
+            }
+
+            html += '</div></div></div></div>';
+
+            const modal = document.createElement('div');
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+
+        } catch (error) {
+            this.showError('Nie udało się załadować walidacji');
         }
-
-        if (route.status !== 'COMPLETED') {
-            actions += `
-                <button class="btn btn-sm btn-danger" onclick="operatorDashboard.deleteRoute(${route.id})">
-                    Usuń
-                </button>
-            `;
-        }
-
-        return actions;
     }
 
-    getStatusText(status) {
-        const statusMap = {
-            'CREATED': 'Utworzona',
-            'ASSIGNED': 'Przypisana',
-            'ACTIVE': 'Aktywna',
-            'COMPLETED': 'Ukończona'
-        };
-        return statusMap[status] || status;
+    async loadDriversList() {
+        const listDiv = document.getElementById('drivers-list');
+        if (!listDiv) return;
+
+        listDiv.innerHTML = '<div class="text-center p-4"><div class="spinner-border"></div></div>';
+
+        try {
+            const response = await fetch('/api/admin/users');
+            if (!response.ok) throw new Error('Failed');
+
+            const allUsers = await response.json();
+            const drivers = allUsers.filter(u => u.role === 'DRIVER');
+
+            if (drivers.length === 0) {
+                listDiv.innerHTML = `
+                    <div class="text-center p-4">
+                        <p>Brak kierowców</p>
+                        <button class="btn btn-primary" onclick="operatorDashboard.showAddDriverModal()">Dodaj kierowcę</button>
+                    </div>
+                `;
+                return;
+            }
+
+            let activeDrivers = [];
+            try {
+                const activeResponse = await fetch('/api/tracking/active-drivers');
+                if (activeResponse.ok) activeDrivers = await activeResponse.json();
+            } catch (e) {}
+
+            listDiv.innerHTML = drivers.map(driver => {
+                const activeInfo = activeDrivers.find(ad => ad.driverUsername === driver.username);
+                const isOnline = activeInfo && activeInfo.isOnline;
+
+                return `
+                    <div class="driver-list-item">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h5>${driver.firstName || driver.username} ${driver.lastName || ''}
+                                    <span class="${isOnline ? 'driver-online' : 'driver-offline'}">
+                                        ${isOnline ? '🟢 Online' : '⚪ Offline'}
+                                    </span>
+                                </h5>
+                                <small>Login: ${driver.username} | Email: ${driver.email}</small>
+                                ${activeInfo ? `<div class="mt-2"><small>Trasa: ${activeInfo.routeDescription || 'Brak'}</small></div>` : ''}
+                            </div>
+                            <button class="btn btn-sm btn-danger" onclick="operatorDashboard.deleteDriver('${driver.username}')">Usuń</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            this.updateDriversSelect(drivers);
+
+        } catch (error) {
+            listDiv.innerHTML = `<div class="alert alert-danger">Błąd: ${error.message}</div>`;
+        }
+    }
+
+    updateDriversSelect(drivers) {
+        const select = document.getElementById('driver-username');
+        if (!select) return;
+
+        select.innerHTML = '<option value="">Wybierz kierowcę...</option>' +
+            drivers.map(d => `<option value="${d.username}">${d.firstName || d.username} ${d.lastName || ''}</option>`).join('');
+    }
+
+    async showAddDriverModal() {
+        const username = prompt('Nazwa użytkownika:');
+        if (!username) return;
+
+        const password = prompt('Hasło:');
+        if (!password) return;
+
+        const email = prompt('Email:');
+        if (!email) return;
+
+        try {
+            const response = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: username.trim(),
+                    password: password.trim(),
+                    email: email.trim(),
+                    role: 'DRIVER',
+                    firstName: username.trim(),
+                    lastName: 'Driver'
+                })
+            });
+
+            if (response.ok) {
+                this.showSuccess('Kierowca dodany!');
+                this.loadDriversList();
+            } else {
+                throw new Error('Failed');
+            }
+        } catch (error) {
+            this.showError('Błąd podczas dodawania kierowcy');
+        }
+    }
+
+    async deleteDriver(username) {
+        if (!confirm(`Usunąć kierowcę ${username}?`)) return;
+
+        try {
+            const response = await fetch(`/api/admin/users/${username}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                this.showSuccess('Kierowca usunięty');
+                this.loadDriversList();
+            }
+        } catch (error) {
+            this.showError('Błąd usuwania');
+        }
     }
 
     async handleRouteSubmit(event) {
         event.preventDefault();
 
-        const formData = this.getFormData();
-        if (!this.validateFormData(formData)) {
+        const formData = {
+            transportSetId: document.getElementById('transport-set').value,
+            startAddress: document.getElementById('start-address').value.trim(),
+            endAddress: document.getElementById('end-address').value.trim(),
+            driverUsername: document.getElementById('driver-username').value.trim()
+        };
+
+        if (!formData.transportSetId || !formData.startAddress || !formData.endAddress) {
+            this.showError('Wypełnij wszystkie pola');
             return;
         }
 
         this.setFormLoading(true);
 
         try {
-            const routeData = await this.geocodeAndCreateRoute(formData);
-            this.showRouteCreated(routeData);
-            this.resetForm();
-            this.loadAllRoutes();
-        } catch (error) {
-            console.error('Error creating route:', error);
-            this.showError('Błąd podczas tworzenia trasy: ' + error.message);
-        } finally {
-            this.setFormLoading(false);
-        }
-    }
+            const geocoder = new window.google.maps.Geocoder();
 
-    getFormData() {
-        return {
-            transportSetId: document.getElementById('transport-set').value,
-            startAddress: document.getElementById('start-address').value.trim(),
-            endAddress: document.getElementById('end-address').value.trim(),
-            driverUsername: document.getElementById('driver-username').value.trim()
-        };
-    }
-
-    validateFormData(formData) {
-        if (!formData.transportSetId) {
-            this.showError('Wybierz zestaw transportowy');
-            return false;
-        }
-        if (!formData.startAddress) {
-            this.showError('Podaj adres startowy');
-            return false;
-        }
-        if (!formData.endAddress) {
-            this.showError('Podaj adres docelowy');
-            return false;
-        }
-        return true;
-    }
-
-    async geocodeAndCreateRoute(formData) {
-        if (!window.google || !window.google.maps) {
-            throw new Error('Google Maps API nie jest dostępne');
-        }
-
-        const geocoder = new window.google.maps.Geocoder();
-
-        try {
-            // Geocode start address
             const startLocation = await this.geocodeAddress(geocoder, formData.startAddress);
             formData.startLatitude = startLocation.lat();
             formData.startLongitude = startLocation.lng();
 
-            // Geocode end address
             const endLocation = await this.geocodeAddress(geocoder, formData.endAddress);
             formData.endLatitude = endLocation.lat();
             formData.endLongitude = endLocation.lng();
 
-            // Create route with infrastructure validation
-            const routeResponse = await fetch('/api/routes/create', {
+            const response = await fetch('/api/routes/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
             });
 
-            if (!routeResponse.ok) {
-                const errorText = await routeResponse.text();
-                throw new Error('Nie udało się utworzyć trasy: ' + errorText);
-            }
+            if (!response.ok) throw new Error('Failed to create route');
 
-            const route = await routeResponse.json();
+            const route = await response.json();
 
-            // Assign driver if specified
             if (formData.driverUsername) {
-                await this.assignDriverToRoute(route.id, formData.driverUsername);
+                await fetch(`/api/routes/${route.id}/assign-driver?driverUsername=${formData.driverUsername}`, {
+                    method: 'POST'
+                });
             }
 
-            // Show route on map if possible
-            this.showRouteOnMap(formData);
+            this.showSuccess('Trasa utworzona!');
+            document.getElementById('route-form').reset();
+            this.loadAllRoutes();
 
-            return route;
-
-        } catch (geocodeError) {
-            throw new Error('Błąd podczas wyszukiwania adresu: ' + geocodeError.message);
+        } catch (error) {
+            this.showError('Błąd: ' + error.message);
+        } finally {
+            this.setFormLoading(false);
         }
     }
 
@@ -404,350 +511,73 @@ class OperatorDashboard {
                 if (status === 'OK' && results[0]) {
                     resolve(results[0].geometry.location);
                 } else {
-                    reject(new Error(`Nie można znaleźć adresu: ${address} (Status: ${status})`));
+                    reject(new Error(`Nie znaleziono: ${address}`));
                 }
             });
         });
-    }
-
-    showRouteOnMap(routeData) {
-        if (!this.map || !this.mapInitialized) {
-            console.log('Map not available for route display');
-            return;
-        }
-
-        try {
-            // Clear existing route markers
-            // Add start marker
-            new window.google.maps.Marker({
-                position: { lat: routeData.startLatitude, lng: routeData.startLongitude },
-                map: this.map,
-                title: 'Start: ' + routeData.startAddress,
-                icon: {
-                    url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
-                    scaledSize: new window.google.maps.Size(32, 32)
-                }
-            });
-
-            // Add end marker
-            new window.google.maps.Marker({
-                position: { lat: routeData.endLatitude, lng: routeData.endLongitude },
-                map: this.map,
-                title: 'Koniec: ' + routeData.endAddress,
-                icon: {
-                    url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
-                    scaledSize: new window.google.maps.Size(32, 32)
-                }
-            });
-
-            // Draw route line
-            const routePath = new window.google.maps.Polyline({
-                path: [
-                    { lat: routeData.startLatitude, lng: routeData.startLongitude },
-                    { lat: routeData.endLatitude, lng: routeData.endLongitude }
-                ],
-                geodesic: true,
-                strokeColor: '#FF0000',
-                strokeOpacity: 1.0,
-                strokeWeight: 3
-            });
-            routePath.setMap(this.map);
-
-            // Fit bounds to show entire route
-            const bounds = new window.google.maps.LatLngBounds();
-            bounds.extend({ lat: routeData.startLatitude, lng: routeData.startLongitude });
-            bounds.extend({ lat: routeData.endLatitude, lng: routeData.endLongitude });
-            this.map.fitBounds(bounds);
-
-        } catch (error) {
-            console.error('Error showing route on map:', error);
-        }
-    }
-
-    async assignDriverToRoute(routeId, driverUsername) {
-        try {
-            const response = await fetch(`/api/routes/${routeId}/assign-driver?driverUsername=${encodeURIComponent(driverUsername)}`, {
-                method: 'POST'
-            });
-
-            if (response.ok) {
-                console.log('Driver assigned successfully');
-                this.showSuccess(`Kierowca ${driverUsername} został przypisany do trasy ${routeId}`);
-            } else {
-                console.warn('Failed to assign driver');
-                this.showError('Nie udało się przypisać kierowcy');
-            }
-        } catch (error) {
-            console.error('Error assigning driver:', error);
-            this.showError('Błąd podczas przypisywania kierowcy');
-        }
-    }
-
-    async deleteRoute(routeId) {
-        if (!confirm('Czy na pewno chcesz usunąć tę trasę?')) {
-            return;
-        }
-
-        try {
-            const response = await fetch(`/api/routes/${routeId}`, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                this.showSuccess('Trasa została usunięta');
-                this.loadAllRoutes();
-            } else {
-                throw new Error('Nie udało się usunąć trasy');
-            }
-        } catch (error) {
-            console.error('Error deleting route:', error);
-            this.showError('Błąd podczas usuwania trasy');
-        }
     }
 
     showAssignDriverModal(routeId) {
-        const driverUsername = prompt('Podaj nazwę użytkownika kierowcy:');
-        if (driverUsername && driverUsername.trim()) {
-            this.assignDriverToRoute(routeId, driverUsername.trim());
-        }
-    }
+        const username = prompt('Nazwa kierowcy:');
+        if (!username) return;
 
-    showRouteCreated(route) {
-        const resultDiv = document.getElementById('route-result');
-        const detailsDiv = document.getElementById('route-details');
-        const warningsDiv = document.getElementById('route-warnings');
-
-        if (resultDiv && detailsDiv) {
-            detailsDiv.innerHTML = `
-                <div>ID Trasy: ${route.id}</div>
-                <div>Dystans: ${route.totalDistanceKm ? route.totalDistanceKm.toFixed(1) : 'N/A'} km</div>
-                <div>Czas: ${route.estimatedTimeMinutes || 'N/A'} min</div>
-                <div>Status walidacji: ${route.hasRestrictions ? 'Znaleziono ograniczenia' : 'Brak ograniczeń'}</div>
-            `;
-
-            if (warningsDiv) {
-                if (route.warnings && route.warnings.length > 0) {
-                    warningsDiv.innerHTML = `
-                        <div class="alert alert-warning mt-2">
-                            <strong>Ograniczenia infrastruktury:</strong>
-                            <ul class="mb-0">
-                                ${route.warnings.map(w => `<li>${w}</li>`).join('')}
-                            </ul>
-                        </div>
-                    `;
-                } else {
-                    warningsDiv.innerHTML = '<div class="alert alert-success mt-2">Trasa bez ograniczeń infrastruktury</div>';
-                }
-            }
-
-            resultDiv.style.display = 'block';
-
-            setTimeout(() => {
-                resultDiv.style.display = 'none';
-            }, 8000);
-        }
-
-        this.showSuccess('Trasa utworzona z walidacją infrastruktury!');
-    }
-
-    async updateDriverPositions() {
-        const driversContainer = document.getElementById('active-drivers-list');
-
-        if (driversContainer) {
-            driversContainer.innerHTML = `
-                <div class="text-center p-3">
-                    <div class="spinner-border text-primary spinner-border-sm" role="status">
-                        <span class="visually-hidden">Ładowanie...</span>
-                    </div>
-                    <p class="mt-2 mb-0 small">Ładowanie kierowców...</p>
-                </div>
-            `;
-        }
-
-        try {
-            const response = await fetch('/api/tracking/active-drivers');
-            if (!response.ok) {
-                throw new Error('Failed to fetch drivers');
-            }
-
-            this.activeDrivers = await response.json();
-            this.updateDriversOnMap();
-            this.updateDriversList();
-        } catch (error) {
-            console.error('Error fetching active drivers:', error);
-            if (driversContainer) {
-                driversContainer.innerHTML = `
-                    <div class="alert alert-warning">
-                        <small>Błąd podczas ładowania kierowców</small>
-                    </div>
-                `;
-            }
-        }
-    }
-
-    updateDriversOnMap() {
-        if (!this.mapInitialized || !this.map) {
-            console.log('Map not initialized, skipping driver markers update');
-            return;
-        }
-
-        // Clear existing driver markers
-        Object.values(this.driverMarkers).forEach(marker => marker.setMap(null));
-        this.driverMarkers = {};
-
-        this.activeDrivers.forEach(driver => {
-            if (driver.latitude && driver.longitude) {
-                const marker = new window.google.maps.Marker({
-                    position: { lat: driver.latitude, lng: driver.longitude },
-                    map: this.map,
-                    title: `${driver.driverUsername} - ${driver.speedKmh || 0} km/h`,
-                    icon: {
-                        url: driver.isOnline ?
-                            'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' :
-                            'http://maps.google.com/mapfiles/ms/icons/orange-dot.png',
-                        scaledSize: new window.google.maps.Size(32, 32)
-                    }
-                });
-
-                const infoWindow = new window.google.maps.InfoWindow({
-                    content: `
-                        <div>
-                            <strong>${driver.driverUsername}</strong><br>
-                            Trasa: ${driver.routeDescription || 'Brak'}<br>
-                            Prędkość: ${driver.speedKmh || 0} km/h<br>
-                            Status: ${driver.isOnline ? 'Online' : 'Offline'}<br>
-                            Ostatnia aktualizacja: ${driver.lastUpdate ? new Date(driver.lastUpdate).toLocaleTimeString() : 'N/A'}
-                        </div>
-                    `
-                });
-
-                marker.addListener('click', () => {
-                    infoWindow.open(this.map, marker);
-                });
-
-                this.driverMarkers[driver.driverUsername] = marker;
+        fetch(`/api/routes/${routeId}/assign-driver?driverUsername=${username}`, {
+            method: 'POST'
+        }).then(r => {
+            if (r.ok) {
+                this.showSuccess('Kierowca przypisany');
+                this.loadAllRoutes();
             }
         });
     }
 
-    updateDriversList() {
-        const listDiv = document.getElementById('active-drivers-list');
-        if (!listDiv) return;
-
-        if (this.activeDrivers.length === 0) {
-            listDiv.innerHTML = `
-                <div class="text-center p-3">
-                    <p class="text-muted mb-0">Brak aktywnych kierowców</p>
-                    <small class="text-muted">Kierowcy pojawią się po uruchomieniu nawigacji</small>
-                </div>
-            `;
-            return;
-        }
-
-        listDiv.innerHTML = this.activeDrivers.map(driver => `
-            <div class="driver-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <strong>${driver.driverUsername}</strong>
-                    <span class="${driver.isOnline ? 'driver-online' : 'driver-offline'}">
-                        ${driver.isOnline ? 'Online' : 'Offline'}
-                    </span>
-                </div>
-                <div class="small text-muted">
-                    ${driver.routeDescription || 'Brak aktywnej trasy'}<br>
-                    Prędkość: ${driver.speedKmh || 0} km/h<br>
-                    ${driver.lastUpdate ? new Date(driver.lastUpdate).toLocaleString() : 'Brak danych'}
-                </div>
-            </div>
-        `).join('');
-    }
-
     centerMapOnPoland() {
-        if (this.map && this.mapInitialized) {
+        if (this.map) {
             this.map.setCenter({ lat: 52.0693, lng: 19.4803 });
             this.map.setZoom(6);
-        } else {
-            this.showError('Mapa nie jest dostępna');
         }
     }
 
     setFormLoading(loading) {
-        const submitBtn = document.querySelector('#route-form button[type="submit"]');
-        const formElements = document.querySelectorAll('#route-form input, #route-form select, #route-form button');
-
-        formElements.forEach(el => {
+        const btn = document.querySelector('#route-form button[type="submit"]');
+        document.querySelectorAll('#route-form input, #route-form select, #route-form button').forEach(el => {
             el.disabled = loading;
         });
-
-        if (submitBtn) {
-            if (loading) {
-                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Tworzenie trasy...';
-            } else {
-                submitBtn.textContent = 'Utwórz Trasę';
-            }
-        }
-    }
-
-    resetForm() {
-        const form = document.getElementById('route-form');
-        if (form) {
-            form.reset();
-        }
+        if (btn) btn.textContent = loading ? 'Tworzenie...' : 'Utwórz Trasę';
     }
 
     startAutoRefresh() {
-        if (this.refreshInterval) {
-            clearInterval(this.refreshInterval);
-        }
-
+        if (this.refreshInterval) clearInterval(this.refreshInterval);
         this.refreshInterval = setInterval(() => {
-            const driversSection = document.getElementById('drivers-section');
-            if (driversSection && driversSection.style.display !== 'none') {
-                this.updateDriverPositions();
+            const section = document.getElementById('drivers-section');
+            if (section && section.style.display !== 'none') {
+                this.loadDriversList();
             }
         }, 30000);
     }
 
-    showSuccess(message) {
-        this.showNotification(message, 'success');
+    showSuccess(msg) {
+        this.showNotification(msg, 'success');
     }
 
-    showError(message) {
-        this.showNotification(message, 'danger');
+    showError(msg) {
+        this.showNotification(msg, 'danger');
     }
 
-    showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
-        notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px; max-width: 400px;';
-        notification.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        `;
-
-        document.body.appendChild(notification);
-
+    showNotification(msg, type = 'info') {
+        const notif = document.createElement('div');
+        notif.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+        notif.style.cssText = 'top:20px;right:20px;z-index:9999;min-width:300px;';
+        notif.innerHTML = `${msg}<button class="btn-close" data-bs-dismiss="alert"></button>`;
+        document.body.appendChild(notif);
         setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
+            if (notif.parentNode) notif.parentNode.removeChild(notif);
         }, 5000);
-
-        const closeBtn = notification.querySelector('.btn-close');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                }
-            });
-        }
     }
 
     destroy() {
-        if (this.refreshInterval) {
-            clearInterval(this.refreshInterval);
-        }
+        if (this.refreshInterval) clearInterval(this.refreshInterval);
     }
 }
 
-// Make OperatorDashboard globally available (no ES6 modules)
 window.OperatorDashboard = OperatorDashboard;

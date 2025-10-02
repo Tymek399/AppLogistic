@@ -26,22 +26,18 @@ public class DataLoader implements CommandLineRunner {
     }
 
     private void loadInitialData() {
-        // Create users if not exist
         if (userRepository.count() == 0) {
             createUsers();
         }
 
-        // Create vehicles if not exist
         if (vehicleRepository.count() == 0) {
             createVehicles();
         }
 
-        // Create transport sets if not exist
         if (transportSetRepository.count() == 0) {
             createTransportSets();
         }
 
-        // Create sample routes if not exist (after transport sets)
         if (routeRepository.count() == 0 && transportSetRepository.count() > 0) {
             createSampleRoutes();
         }
@@ -50,7 +46,6 @@ public class DataLoader implements CommandLineRunner {
     }
 
     private void createUsers() {
-        // Create admin user
         User admin = new User();
         admin.setUsername("admin");
         admin.setPassword(passwordEncoder.encode("admin123"));
@@ -60,7 +55,6 @@ public class DataLoader implements CommandLineRunner {
         admin.setLastName("System");
         userRepository.save(admin);
 
-        // Create operator user
         User operator = new User();
         operator.setUsername("operator");
         operator.setPassword(passwordEncoder.encode("password123"));
@@ -70,7 +64,6 @@ public class DataLoader implements CommandLineRunner {
         operator.setLastName("Kowalski");
         userRepository.save(operator);
 
-        // Create driver user
         User driver = new User();
         driver.setUsername("driver");
         driver.setPassword(passwordEncoder.encode("password123"));
@@ -80,7 +73,6 @@ public class DataLoader implements CommandLineRunner {
         driver.setLastName("Nowak");
         userRepository.save(driver);
 
-        // Create additional driver
         User driver2 = new User();
         driver2.setUsername("driver2");
         driver2.setPassword(passwordEncoder.encode("password123"));
@@ -94,13 +86,15 @@ public class DataLoader implements CommandLineRunner {
     }
 
     private void createVehicles() {
-        // Transporters (Ciężarówki)
+        // TRANSPORTERY (Ciężarówki)
         Vehicle truck1 = new Vehicle();
         truck1.setModel("MAN TGX 26.480");
         truck1.setType(Vehicle.VehicleType.TRANSPORTER);
         truck1.setTotalWeightKg(26000);
         truck1.setHeightCm(350);
         truck1.setMaxAxleLoadKg(11500);
+        truck1.setCanDriveAlone(false);
+        truck1.setVehicleCategory("TRUCK");
         vehicleRepository.save(truck1);
 
         Vehicle truck2 = new Vehicle();
@@ -109,32 +103,20 @@ public class DataLoader implements CommandLineRunner {
         truck2.setTotalWeightKg(25000);
         truck2.setHeightCm(340);
         truck2.setMaxAxleLoadKg(11000);
+        truck2.setCanDriveAlone(false);
+        truck2.setVehicleCategory("TRUCK");
         vehicleRepository.save(truck2);
 
-        Vehicle truck3 = new Vehicle();
-        truck3.setModel("Volvo FH16 750");
-        truck3.setType(Vehicle.VehicleType.TRANSPORTER);
-        truck3.setTotalWeightKg(28000);
-        truck3.setHeightCm(360);
-        truck3.setMaxAxleLoadKg(12000);
-        vehicleRepository.save(truck3);
-
-        // Cargo (Sprzęt wojskowy)
+        // CARGO NA NACZEPĘ (Ciężkie)
         Vehicle tank1 = new Vehicle();
         tank1.setModel("Leopard 2A5");
         tank1.setType(Vehicle.VehicleType.CARGO);
         tank1.setTotalWeightKg(62000);
         tank1.setHeightCm(300);
         tank1.setMaxAxleLoadKg(15500);
+        tank1.setCanDriveAlone(false); // Wymaga naczepy
+        tank1.setVehicleCategory("MILITARY_VEHICLE");
         vehicleRepository.save(tank1);
-
-        Vehicle apc1 = new Vehicle();
-        apc1.setModel("KTO Rosomak");
-        apc1.setType(Vehicle.VehicleType.CARGO);
-        apc1.setTotalWeightKg(22000);
-        apc1.setHeightCm(280);
-        apc1.setMaxAxleLoadKg(8000);
-        vehicleRepository.save(apc1);
 
         Vehicle howitzer1 = new Vehicle();
         howitzer1.setModel("AHS Krab");
@@ -142,7 +124,20 @@ public class DataLoader implements CommandLineRunner {
         howitzer1.setTotalWeightKg(48000);
         howitzer1.setHeightCm(320);
         howitzer1.setMaxAxleLoadKg(12000);
+        howitzer1.setCanDriveAlone(false);
+        howitzer1.setVehicleCategory("MILITARY_VEHICLE");
         vehicleRepository.save(howitzer1);
+
+        // ✅ POJAZDY STANDALONE (Mogą jechać same)
+        Vehicle rosomak = new Vehicle();
+        rosomak.setModel("KTO Rosomak");
+        rosomak.setType(Vehicle.VehicleType.CARGO);
+        rosomak.setTotalWeightKg(22000);
+        rosomak.setHeightCm(280);
+        rosomak.setMaxAxleLoadKg(8000);
+        rosomak.setCanDriveAlone(true); // ✅ Jedzie sam
+        rosomak.setVehicleCategory("STANDALONE");
+        vehicleRepository.save(rosomak);
 
         Vehicle radar1 = new Vehicle();
         radar1.setModel("PILICA Radar");
@@ -150,117 +145,172 @@ public class DataLoader implements CommandLineRunner {
         radar1.setTotalWeightKg(15000);
         radar1.setHeightCm(450);
         radar1.setMaxAxleLoadKg(7500);
+        radar1.setCanDriveAlone(true); // ✅ Jedzie sam
+        radar1.setVehicleCategory("STANDALONE");
         vehicleRepository.save(radar1);
 
-        log.info("Created {} vehicles", vehicleRepository.count());
+        // ✅ LEKKIE POJAZDY (do 5t)
+        Vehicle lightTruck = new Vehicle();
+        lightTruck.setModel("Mercedes Sprinter 516 CDI");
+        lightTruck.setType(Vehicle.VehicleType.CARGO);
+        lightTruck.setTotalWeightKg(3500); // 3.5t
+        lightTruck.setHeightCm(270);
+        lightTruck.setMaxAxleLoadKg(1750);
+        lightTruck.setCanDriveAlone(true);
+        lightTruck.setVehicleCategory("STANDALONE");
+        vehicleRepository.save(lightTruck);
+
+        Vehicle humvee = new Vehicle();
+        humvee.setModel("HMMWV Humvee");
+        humvee.setType(Vehicle.VehicleType.CARGO);
+        humvee.setTotalWeightKg(4500); // 4.5t
+        humvee.setHeightCm(185);
+        humvee.setMaxAxleLoadKg(2250);
+        humvee.setCanDriveAlone(true);
+        humvee.setVehicleCategory("STANDALONE");
+        vehicleRepository.save(humvee);
+
+        log.info("Created {} vehicles (including standalone)", vehicleRepository.count());
     }
 
     private void createTransportSets() {
         var transporters = vehicleRepository.findByTypeAndActive(Vehicle.VehicleType.TRANSPORTER, true);
         var cargo = vehicleRepository.findByTypeAndActive(Vehicle.VehicleType.CARGO, true);
 
-        if (transporters.size() >= 3 && cargo.size() >= 4) {
-            // Set 1: MAN + Leopard
-            TransportSet set1 = new TransportSet();
-            set1.setTransporter(transporters.get(0));
-            set1.setCargo(cargo.get(0));
-            set1.setDescription("Transport czołgu Leopard 2A5");
-            set1.setTotalHeightCm(Math.max(transporters.get(0).getHeightCm(), cargo.get(0).getHeightCm()));
-            set1.setTotalWeightKg(transporters.get(0).getTotalWeightKg() + cargo.get(0).getTotalWeightKg());
-            set1.setMaxAxleLoadKg(Math.max(transporters.get(0).getMaxAxleLoadKg(), cargo.get(0).getMaxAxleLoadKg()));
-            transportSetRepository.save(set1);
-
-            // Set 2: Mercedes + Rosomak
-            TransportSet set2 = new TransportSet();
-            set2.setTransporter(transporters.get(1));
-            set2.setCargo(cargo.get(1));
-            set2.setDescription("Transport transportera Rosomak");
-            set2.setTotalHeightCm(Math.max(transporters.get(1).getHeightCm(), cargo.get(1).getHeightCm()));
-            set2.setTotalWeightKg(transporters.get(1).getTotalWeightKg() + cargo.get(1).getTotalWeightKg());
-            set2.setMaxAxleLoadKg(Math.max(transporters.get(1).getMaxAxleLoadKg(), cargo.get(1).getMaxAxleLoadKg()));
-            transportSetRepository.save(set2);
-
-            // Set 3: Volvo + Krab
-            TransportSet set3 = new TransportSet();
-            set3.setTransporter(transporters.get(2));
-            set3.setCargo(cargo.get(2));
-            set3.setDescription("Transport haubicy Krab");
-            set3.setTotalHeightCm(Math.max(transporters.get(2).getHeightCm(), cargo.get(2).getHeightCm()));
-            set3.setTotalWeightKg(transporters.get(2).getTotalWeightKg() + cargo.get(2).getTotalWeightKg());
-            set3.setMaxAxleLoadKg(Math.max(transporters.get(2).getMaxAxleLoadKg(), cargo.get(2).getMaxAxleLoadKg()));
-            transportSetRepository.save(set3);
-
-            // Set 4: MAN + Radar (high vehicle)
-            TransportSet set4 = new TransportSet();
-            set4.setTransporter(transporters.get(0));
-            set4.setCargo(cargo.get(3));
-            set4.setDescription("Transport radaru PILICA");
-            set4.setTotalHeightCm(Math.max(transporters.get(0).getHeightCm(), cargo.get(3).getHeightCm()));
-            set4.setTotalWeightKg(transporters.get(0).getTotalWeightKg() + cargo.get(3).getTotalWeightKg());
-            set4.setMaxAxleLoadKg(Math.max(transporters.get(0).getMaxAxleLoadKg(), cargo.get(3).getMaxAxleLoadKg()));
-            transportSetRepository.save(set4);
-
-            log.info("Created {} transport sets", transportSetRepository.count());
+        if (transporters.isEmpty() || cargo.isEmpty()) {
+            log.warn("No transporters or cargo found");
+            return;
         }
+
+        // Znajdź pojazdy
+        Vehicle manTruck = transporters.stream()
+                .filter(v -> v.getModel().contains("MAN"))
+                .findFirst().orElse(transporters.get(0));
+
+        Vehicle mercedesTruck = transporters.stream()
+                .filter(v -> v.getModel().contains("Mercedes"))
+                .findFirst().orElse(transporters.get(0));
+
+        Vehicle leopard = cargo.stream()
+                .filter(v -> v.getModel().contains("Leopard"))
+                .findFirst().orElse(null);
+
+        Vehicle krab = cargo.stream()
+                .filter(v -> v.getModel().contains("Krab"))
+                .findFirst().orElse(null);
+
+        Vehicle rosomak = cargo.stream()
+                .filter(v -> v.getModel().contains("Rosomak"))
+                .findFirst().orElse(null);
+
+        Vehicle sprinter = cargo.stream()
+                .filter(v -> v.getModel().contains("Sprinter"))
+                .findFirst().orElse(null);
+
+        Vehicle humvee = cargo.stream()
+                .filter(v -> v.getModel().contains("Humvee"))
+                .findFirst().orElse(null);
+
+        // ZESTAW 1: Czołg na naczepie (ciężki)
+        if (leopard != null) {
+            TransportSet set1 = new TransportSet();
+            set1.setTransporter(manTruck);
+            set1.setCargo(leopard);
+            set1.setDescription("Transport czołgu Leopard 2A5 na naczepie niskopodwoziowej");
+            set1.calculateTransportParameters();
+            transportSetRepository.save(set1);
+            log.info("Utworzono zestaw: {}", set1.getDescription());
+        }
+
+        // ZESTAW 2: Haubica na naczepie (ciężki)
+        if (krab != null) {
+            TransportSet set2 = new TransportSet();
+            set2.setTransporter(mercedesTruck);
+            set2.setCargo(krab);
+            set2.setDescription("Transport haubicy Krab na naczepie wzmocnionej");
+            set2.calculateTransportParameters();
+            transportSetRepository.save(set2);
+            log.info("Utworzono zestaw: {}", set2.getDescription());
+        }
+
+        // ✅ ZESTAW 3: Rosomak jedzie sam (STANDALONE)
+        if (rosomak != null) {
+            TransportSet set3 = new TransportSet();
+            set3.setTransporter(manTruck); // Formalnie potrzebny, ale nie używany
+            set3.setCargo(rosomak);
+            set3.setDescription("KTO Rosomak - pojazd samojezdny");
+            set3.calculateTransportParameters();
+            transportSetRepository.save(set3);
+            log.info("Utworzono zestaw standalone: {}", set3.getDescription());
+            log.info("  - Wysokość: {}cm (pojazd jedzie sam)", set3.getTotalHeightCm());
+            log.info("  - Waga: {}kg", set3.getTotalWeightKg());
+        }
+
+        // ✅ ZESTAW 4: Lekki pojazd Sprinter (auto-akceptacja)
+        if (sprinter != null) {
+            TransportSet set4 = new TransportSet();
+            set4.setTransporter(manTruck);
+            set4.setCargo(sprinter);
+            set4.setDescription("Mercedes Sprinter - pojazd lekki (auto-akceptacja tras)");
+            set4.calculateTransportParameters();
+            transportSetRepository.save(set4);
+            log.info("Utworzono zestaw lekki: {}", set4.getDescription());
+            log.info("  - Waga: {}kg (≤5t - bez walidacji mostów)", set4.getTotalWeightKg());
+        }
+
+        // ✅ ZESTAW 5: Humvee (lekki wojskowy)
+        if (humvee != null) {
+            TransportSet set5 = new TransportSet();
+            set5.setTransporter(manTruck);
+            set5.setCargo(humvee);
+            set5.setDescription("HMMWV Humvee - pojazd lekki wojskowy");
+            set5.calculateTransportParameters();
+            transportSetRepository.save(set5);
+            log.info("Utworzono zestaw lekki wojskowy: {}", set5.getDescription());
+        }
+
+        log.info("Created {} transport sets", transportSetRepository.count());
     }
 
     private void createSampleRoutes() {
         var transportSets = transportSetRepository.findAll();
-        if (!transportSets.isEmpty()) {
-
-            // Sample route 1: Warsaw to Poznan
-            Route route1 = new Route();
-            route1.setStartAddress("Warszawa, Polska");
-            route1.setEndAddress("Poznań, Polska");
-            route1.setStartLatitude(52.2297);
-            route1.setStartLongitude(21.0122);
-            route1.setEndLatitude(52.4064);
-            route1.setEndLongitude(16.9252);
-            route1.setTransportSet(transportSets.get(0));
-            route1.setCreatedByUsername("operator");
-            route1.setTotalDistanceKm(310.0);
-            route1.setEstimatedTimeMinutes(240);
-            route1.setRouteDataJson("{}");
-            routeRepository.save(route1);
-
-            // Sample route 2: Krakow to Gdansk (assigned to driver)
-            Route route2 = new Route();
-            route2.setStartAddress("Kraków, Polska");
-            route2.setEndAddress("Gdańsk, Polska");
-            route2.setStartLatitude(50.0647);
-            route2.setStartLongitude(19.9450);
-            route2.setEndLatitude(54.3520);
-            route2.setEndLongitude(18.6466);
-            route2.setTransportSet(transportSets.size() > 1 ? transportSets.get(1) : transportSets.get(0));
-            route2.setCreatedByUsername("operator");
-            route2.setAssignedDriverUsername("driver");
-            route2.setStatus(Route.RouteStatus.ASSIGNED);
-            route2.setTotalDistanceKm(540.0);
-            route2.setEstimatedTimeMinutes(420);
-            route2.setRouteDataJson("{}");
-            route2.setAssignedAt(LocalDateTime.now().minusHours(2));
-            routeRepository.save(route2);
-
-            // Sample route 3: Wroclaw to Lublin (active)
-            Route route3 = new Route();
-            route3.setStartAddress("Wrocław, Polska");
-            route3.setEndAddress("Lublin, Polska");
-            route3.setStartLatitude(51.1079);
-            route3.setStartLongitude(17.0385);
-            route3.setEndLatitude(51.2465);
-            route3.setEndLongitude(22.5684);
-            route3.setTransportSet(transportSets.size() > 2 ? transportSets.get(2) : transportSets.get(0));
-            route3.setCreatedByUsername("operator");
-            route3.setAssignedDriverUsername("driver2");
-            route3.setStatus(Route.RouteStatus.ACTIVE);
-            route3.setTotalDistanceKm(380.0);
-            route3.setEstimatedTimeMinutes(320);
-            route3.setRouteDataJson("{}");
-            route3.setAssignedAt(LocalDateTime.now().minusHours(1));
-            route3.setStartedAt(LocalDateTime.now().minusMinutes(30));
-            routeRepository.save(route3);
-
-            log.info("Created {} sample routes", routeRepository.count());
+        if (transportSets.isEmpty()) {
+            return;
         }
+
+        // Trasa 1: Warszawa - Poznań (przykład dla ciężkiego zestawu)
+        Route route1 = new Route();
+        route1.setStartAddress("Warszawa, Polska");
+        route1.setEndAddress("Poznań, Polska");
+        route1.setStartLatitude(52.2297);
+        route1.setStartLongitude(21.0122);
+        route1.setEndLatitude(52.4064);
+        route1.setEndLongitude(16.9252);
+        route1.setTransportSet(transportSets.get(0));
+        route1.setCreatedByUsername("operator");
+        route1.setTotalDistanceKm(310.0);
+        route1.setEstimatedTimeMinutes(240);
+        route1.setRouteDataJson("{}");
+        routeRepository.save(route1);
+
+        // Trasa 2: Kraków - Gdańsk (przypisana kierowcy)
+        Route route2 = new Route();
+        route2.setStartAddress("Kraków, Polska");
+        route2.setEndAddress("Gdańsk, Polska");
+        route2.setStartLatitude(50.0647);
+        route2.setStartLongitude(19.9450);
+        route2.setEndLatitude(54.3520);
+        route2.setEndLongitude(18.6466);
+        route2.setTransportSet(transportSets.size() > 1 ? transportSets.get(1) : transportSets.get(0));
+        route2.setCreatedByUsername("operator");
+        route2.setAssignedDriverUsername("driver");
+        route2.setStatus(Route.RouteStatus.ASSIGNED);
+        route2.setTotalDistanceKm(540.0);
+        route2.setEstimatedTimeMinutes(420);
+        route2.setRouteDataJson("{}");
+        route2.setAssignedAt(LocalDateTime.now().minusHours(2));
+        routeRepository.save(route2);
+
+        log.info("Created {} sample routes", routeRepository.count());
     }
 }

@@ -1,4 +1,4 @@
-package com.military.applogistic.dto;
+package com.military.applogistic.dto.request;
 
 import lombok.Data;
 

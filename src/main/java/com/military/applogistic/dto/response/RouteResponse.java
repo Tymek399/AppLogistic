@@ -1,4 +1,4 @@
-package com.military.applogistic.dto;
+package com.military.applogistic.dto.response;
 
 import lombok.Data;
 import com.military.applogistic.entity.Route;

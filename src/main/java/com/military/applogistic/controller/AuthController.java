@@ -1,7 +1,7 @@
 package com.military.applogistic.controller;
 
-import com.military.applogistic.dto.LoginRequest;
-import com.military.applogistic.dto.LoginResponse;
+import com.military.applogistic.dto.request.LoginRequest;
+import com.military.applogistic.dto.response.LoginResponse;
 import com.military.applogistic.security.JwtUtil;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;

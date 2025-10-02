@@ -275,6 +275,24 @@
         }
     `;
     document.head.appendChild(style);
+
+    // ✅ Automatyczne przeładowanie tras co 2 sekundy po utworzeniu
+    let lastRouteCount = 0;
+    setInterval(() => {
+        if (operatorDashboard && operatorDashboard.routes) {
+            if (operatorDashboard.routes.length !== lastRouteCount) {
+                lastRouteCount = operatorDashboard.routes.length;
+                displayRoutesWithAllButtons();  // Wymuszenie odświeżenia
+            }
+        }
+    }, 2000);
+
+    // ✅ Wymuś odświeżenie po utworzeniu trasy
+    const originalLoadAllRoutes = operatorDashboard.loadAllRoutes;
+    operatorDashboard.loadAllRoutes = function() {
+        originalLoadAllRoutes.call(this);
+        setTimeout(() => displayRoutesWithAllButtons(), 500);
+    };
 </script>
 </body>
 </html>

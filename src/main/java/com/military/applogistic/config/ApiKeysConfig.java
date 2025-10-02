@@ -11,6 +11,7 @@ public class ApiKeysConfig {
 
     private GoogleMaps googleMaps = new GoogleMaps();
     private HereMaps hereMaps = new HereMaps();
+    private Tomtom tomtom = new Tomtom();
 
     @Data
     public static class GoogleMaps {
@@ -26,6 +27,13 @@ public class ApiKeysConfig {
         private String baseUrl = "https://router.hereapi.com/v8";
     }
 
+    @Data
+    public static class Tomtom {
+        private String key = "";
+        private boolean enabled = false;
+        private String baseUrl = "https://api.tomtom.com/routing/1";
+    }
+
     // Metody pomocnicze
     public boolean isGoogleMapsEnabled() {
         return googleMaps.enabled && isValidKey(googleMaps.key);
@@ -35,10 +43,14 @@ public class ApiKeysConfig {
         return hereMaps.enabled && isValidKey(hereMaps.key);
     }
 
+    public boolean isTomtomEnabled() {
+        return tomtom.enabled && isValidKey(tomtom.key);
+    }
+
     private boolean isValidKey(String key) {
         return key != null &&
                 !key.isEmpty() &&
                 !key.equals("demo_key_replace_with_real") &&
-                key.length() > 10; // Podstawowa walidacja długości klucza API
+                key.length() > 10;
     }
 }
