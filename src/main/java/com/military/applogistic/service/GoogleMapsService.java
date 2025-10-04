@@ -22,11 +22,9 @@ public class GoogleMapsService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HereMapsService hereMapsService;
     private final OverpassService overpassService;
-    private final TomTomService tomTomService;
     private final BridgeDataService bridgeDataService;
-    private final MilitaryLoadCalculator loadCalculator;
 
-    // CACHE dla tras - oszczędność wywołań API
+    // Cache dla tras
     private final Map<String, Map<String, Object>> routeCache = new HashMap<>();
 
     public Map<String, Object> getRoute(String startAddress, String endAddress,
@@ -36,49 +34,39 @@ public class GoogleMapsService {
         }
 
         try {
-            log.info("Pobieranie trasy z {} do {}", startAddress, endAddress);
+            log.info("🗺️ Pobieranie trasy: {} → {}", startAddress, endAddress);
+            log.info("Parametry: masa={}kg, wysokość={}cm",
+                    transportSet.getTotalWeightKg(), transportSet.getTotalHeightCm());
 
-            // CACHE KEY
+            // Cache
             String cacheKey = buildCacheKey(startAddress, endAddress, excludedBridges);
-
-            // Sprawdź cache
             if (routeCache.containsKey(cacheKey)) {
-                log.info("CACHE HIT - używam zapisanej trasy");
-                Map<String, Object> cachedRoute = routeCache.get(cacheKey);
-
-                // Nadal wykonaj walidację (lekka operacja bez ponownego pobierania trasy)
-                return enrichCachedRoute(cachedRoute, transportSet);
+                log.info("✅ CACHE HIT - używam zapisanej trasy");
+                return enrichCachedRoute(routeCache.get(cacheKey), transportSet);
             }
 
-            // Pobierz nową trasę z Google Maps
+            // 1. Google Maps - JEDNA trasa
             Map<String, Object> googleResponse = performGoogleMapsApiCall(
                     startAddress, endAddress, excludedBridges);
 
-            if (googleResponse == null) {
-                throw new RuntimeException("Google Maps returned null response");
-            }
-
-            // Zapisz do cache
             routeCache.put(cacheKey, googleResponse);
-
-            // Wyczyść cache jeśli przekroczy 100 wpisów
             if (routeCache.size() > 100) {
                 routeCache.clear();
-                log.info("Cache wyczyszczony");
             }
 
             List<double[]> routeCoordinates = extractDetailedRouteCoordinates(googleResponse);
 
-            log.info("Sprawdzanie infrastruktury przez OpenStreetMap...");
+            // 2. OpenStreetMap - mosty/tunele (DARMOWE)
+            log.info("🔍 Sprawdzanie infrastruktury przez OpenStreetMap...");
             List<InfrastructurePoint> infrastructure = overpassService.getInfrastructureAlongRoute(routeCoordinates);
-
             infrastructure = filterExcludedBridges(infrastructure, excludedBridges);
 
-            log.info("Po filtrowaniu pozostało {} obiektów do sprawdzenia", infrastructure.size());
+            log.info("✅ Po filtrowaniu pozostało {} obiektów", infrastructure.size());
 
-            // HERE Maps walidacja (TYLKO dla ciężkich pojazdów)
+            // 3. HERE Maps - JEDNO WYWOŁANIE dla całej trasy (tylko ciężkie pojazdy)
             Map<String, Object> hereValidation = null;
             if (transportSet.getTotalWeightKg() > 5000) {
+                log.info("📡 Walidacja HERE Maps (pojazd ciężki)");
                 hereValidation = hereMapsService.validateRouteRestrictions(
                         routeCoordinates.get(0)[0], routeCoordinates.get(0)[1],
                         routeCoordinates.get(routeCoordinates.size()-1)[0],
@@ -86,18 +74,18 @@ public class GoogleMapsService {
                         transportSet
                 );
             } else {
-                log.info("Pojazd lekki - pomijam walidację HERE Maps");
+                log.info("⚡ Pojazd lekki (≤5t) - pomijam walidację HERE Maps");
             }
 
             Map<String, Object> enrichedRoute = combineAllValidations(
-                    googleResponse, infrastructure, hereValidation, null, transportSet
+                    googleResponse, infrastructure, hereValidation, transportSet
             );
 
-            log.info("Trasa utworzona z walidacją infrastruktury");
+            log.info("✅ Trasa utworzona z walidacją");
             return enrichedRoute;
 
         } catch (Exception e) {
-            log.error("Błąd pobierania trasy", e);
+            log.error("❌ Błąd pobierania trasy", e);
             throw new RuntimeException("Failed to create route: " + e.getMessage(), e);
         }
     }
@@ -108,7 +96,6 @@ public class GoogleMapsService {
 
     private Map<String, Object> enrichCachedRoute(Map<String, Object> cachedRoute,
                                                   TransportSet transportSet) {
-        // Szybka walidacja bez ponownego pobierania trasy
         Map<String, Object> enriched = new HashMap<>(cachedRoute);
         enriched.put("fromCache", true);
         enriched.put("transportSet", createTransportSetInfo(transportSet));
@@ -128,7 +115,7 @@ public class GoogleMapsService {
             boolean excluded = false;
             for (String excludedName : excludedBridges) {
                 if (point.getName().contains(excludedName) || excludedName.contains(point.getName())) {
-                    log.debug("Pomijam wykluczony most: {}", point.getName());
+                    log.debug("🚫 Pomijam wykluczony most: {}", point.getName());
                     excluded = true;
                     break;
                 }
@@ -152,7 +139,7 @@ public class GoogleMapsService {
                 apiKeysConfig.getGoogleMaps().getKey()
         );
 
-        log.info("Wywołanie Google Maps Directions API");
+        log.info("📡 Calling Google Maps Directions API");
 
         try {
             Map<String, Object> response = restTemplate.getForObject(url, Map.class);
@@ -168,11 +155,11 @@ public class GoogleMapsService {
                         (errorMessage != null ? " - " + errorMessage : ""));
             }
 
-            log.info("Google Maps route retrieved successfully");
+            log.info("✅ Google Maps route retrieved successfully");
             return response;
 
         } catch (Exception e) {
-            log.error("Google Maps API call failed", e);
+            log.error("❌ Google Maps API call failed", e);
             throw new RuntimeException("Google Maps API call failed: " + e.getMessage(), e);
         }
     }
@@ -259,7 +246,6 @@ public class GoogleMapsService {
             Map<String, Object> googleRoute,
             List<InfrastructurePoint> osmInfrastructure,
             Map<String, Object> hereValidation,
-            Map<String, Object> tomtomValidation,
             TransportSet transportSet) {
 
         Map<String, Object> combined = new HashMap<>(googleRoute);
@@ -269,8 +255,9 @@ public class GoogleMapsService {
         List<String> allViolations = new ArrayList<>();
         List<Map<String, Object>> infrastructureDetails = new ArrayList<>();
 
-        log.info("Znaleziono {} obiektów infrastruktury na trasie", osmInfrastructure.size());
+        log.info("📊 Znaleziono {} obiektów infrastruktury na trasie", osmInfrastructure.size());
 
+        // Analiza każdego mostu/tunelu
         for (InfrastructurePoint point : osmInfrastructure) {
             Map<String, Object> detail = analyzeInfrastructurePoint(point, transportSet);
             infrastructureDetails.add(detail);
@@ -287,12 +274,9 @@ public class GoogleMapsService {
             }
         }
 
+        // HERE Maps validation
         if (hereValidation != null) {
             mergeValidationData(hereValidation, allWarnings, allRestrictions, allViolations);
-        }
-
-        if (tomtomValidation != null && !tomtomValidation.isEmpty()) {
-            mergeValidationData(tomtomValidation, allWarnings, allRestrictions, allViolations);
         }
 
         List<String> routeJustification = buildDetailedJustification(
@@ -307,7 +291,7 @@ public class GoogleMapsService {
         combined.put("warnings", allWarnings);
         combined.put("infrastructureDetails", infrastructureDetails);
         combined.put("routeJustification", routeJustification);
-        combined.put("validation_source", "multi_source");
+        combined.put("validation_source", "optimized_multi_source");
         combined.put("transportSet", createTransportSetInfo(transportSet));
         combined.put("infrastructureCount", osmInfrastructure.size());
         combined.put("routeAvailable", allViolations.isEmpty());
@@ -328,9 +312,8 @@ public class GoogleMapsService {
         boolean canPass = true;
         StringBuilder checkResult = new StringBuilder();
 
+        // Wzbogacenie danych (HEURYSTYKA - nie API!)
         if (point.getMaxWeightTons() == null && point.getMaxHeightMeters() == null) {
-            log.warn("Brak danych dla: {} - pobieranie z zewnętrznego API", point.getName());
-
             MilitaryLoadCalculator.BridgeSpecification enrichedSpec =
                     bridgeDataService.enrichBridgeData(point, transportSet);
 
@@ -349,16 +332,12 @@ public class GoogleMapsService {
 
             if (margin < 0) {
                 if (Math.abs(margin) <= 15.0) {
-                    warnings.add(String.format("%s - przekroczenie %.1ft - MOŻLIWE Z POZWOLENIEM WOJSKOWYM",
+                    warnings.add(String.format("%s - przekroczenie %.1ft - MOŻLIWE Z POZWOLENIEM",
                             point.getName(), Math.abs(margin)));
-                    checkResult.append(String.format("Limit %.1ft, transport %.1ft (przekroczenie %.1ft)",
-                            point.getMaxWeightTons(), transportWeight, Math.abs(margin)));
                 } else {
                     canPass = false;
                     violation = String.format("%s - PRZEKROCZONA NOŚNOŚĆ: limit %.1ft, twój zestaw %.1ft",
                             point.getName(), point.getMaxWeightTons(), transportWeight);
-                    checkResult.append(String.format("Limit %.1ft < transport %.1ft",
-                            point.getMaxWeightTons(), transportWeight));
                 }
             } else if (margin < 10) {
                 warnings.add(String.format("%s - margines nośności tylko %.1ft", point.getName(), margin));
@@ -391,7 +370,6 @@ public class GoogleMapsService {
 
         return detail;
     }
-
     private InfrastructurePoint updatePointWithEnrichedData(
             InfrastructurePoint original,
             MilitaryLoadCalculator.BridgeSpecification enriched) {
@@ -444,7 +422,22 @@ public class GoogleMapsService {
         justification.add(String.format("Ładunek: %s", transportSet.getCargo().getModel()));
         justification.add("");
         justification.add("Parametry techniczne:");
-        justification.add(String.format("  • Masa całkowita: %.1f ton", transportSet.getTotalWeightKg() / 1000.0));
+
+        // Szczegóły wagi
+        if (Boolean.TRUE.equals(transportSet.getCargo().getCanDriveAlone())) {
+            justification.add(String.format("  • Masa pojazdu: %.1f ton (samojezdny)",
+                    transportSet.getTotalWeightKg() / 1000.0));
+        } else {
+            int tractorWeight = (int) (transportSet.getTransporter().getTotalWeightKg() * 0.4);
+            int trailerWeight = estimateSemiTrailerWeight(transportSet.getCargo().getTotalWeightKg());
+            int cargoWeight = transportSet.getCargo().getTotalWeightKg();
+
+            justification.add(String.format("  • Masa całkowita: %.1f ton", transportSet.getTotalWeightKg() / 1000.0));
+            justification.add(String.format("    - Ciągnik: %.1f ton", tractorWeight / 1000.0));
+            justification.add(String.format("    - Naczepa: %.1f ton", trailerWeight / 1000.0));
+            justification.add(String.format("    - Ładunek: %.1f ton", cargoWeight / 1000.0));
+        }
+
         justification.add(String.format("  • Wysokość: %.2f m", transportSet.getTotalHeightCm() / 100.0));
 
         if (transportSet.getTrailerHeightCm() != null && transportSet.getTrailerHeightCm() > 0) {
@@ -452,9 +445,11 @@ public class GoogleMapsService {
                     transportSet.getTrailerHeightCm() / 100.0,
                     transportSet.getCargo().getHeightCm() / 100.0));
         } else {
-            justification.add("    (pojazd samojezdny - bez naczepy)");
+            justification.add("    (pojazd samojezdny)");
         }
 
+        justification.add(String.format("  • Długość: %.2f m", transportSet.getTotalLengthCm() / 100.0));
+        justification.add(String.format("  • Szerokość: %.2f m", transportSet.getTotalWidthCm() / 100.0));
         justification.add("");
 
         justification.add("SPRAWDZONE OBIEKTY INFRASTRUKTURY:");
@@ -463,11 +458,19 @@ public class GoogleMapsService {
         if (infrastructure.isEmpty()) {
             justification.add("Brak danych o mostach/tunelach na tej trasie");
         } else {
-            justification.add(String.format("Znaleziono %d obiektów do sprawdzenia:", infrastructure.size()));
+            justification.add(String.format("Znaleziono %d obiektów:", infrastructure.size()));
             justification.add("");
 
+            int bridgeCount = 0;
+            int tunnelCount = 0;
+
             for (InfrastructurePoint point : infrastructure) {
-                String icon = point.getType() == OverpassService.InfrastructureType.BRIDGE ? "🌉" : "🚇";
+                String icon = point.getType() == OverpassService.InfrastructureType.BRIDGE ? "🌉" :
+                        point.getType() == OverpassService.InfrastructureType.TUNNEL ? "🚇" : "⚠️";
+
+                if (point.getType() == OverpassService.InfrastructureType.BRIDGE) bridgeCount++;
+                if (point.getType() == OverpassService.InfrastructureType.TUNNEL) tunnelCount++;
+
                 justification.add(String.format("%s %s: %s", icon, point.getType().getPolish(), point.getName()));
 
                 if (point.getRoadName() != null) {
@@ -485,6 +488,8 @@ public class GoogleMapsService {
                         justification.add(String.format("   ✅ NOŚNOŚĆ: limit %.1ft, twój zestaw %.1ft (zapas %.1ft)",
                                 point.getMaxWeightTons(), transportSet.getTotalWeightKg() / 1000.0, margin));
                     }
+                } else {
+                    justification.add("   ⚠️ Brak danych o nośności (użyto heurystyki)");
                 }
 
                 if (point.getMaxHeightMeters() != null) {
@@ -496,22 +501,29 @@ public class GoogleMapsService {
                         justification.add(String.format("   ✅ WYSOKOŚĆ: limit %.2fm, twój zestaw %.2fm (zapas %.0fcm)",
                                 point.getMaxHeightMeters(), transportSet.getTotalHeightCm() / 100.0, margin * 100));
                     }
+                } else {
+                    justification.add("   ⚠️ Brak danych o wysokości (użyto heurystyki)");
                 }
 
                 justification.add("");
             }
+
+            justification.add("────────────────────────────────────────────");
+            justification.add(String.format("STATYSTYKI: %d mostów, %d tuneli", bridgeCount, tunnelCount));
         }
 
+        justification.add("");
         justification.add("WYNIK ANALIZY TRASY:");
         justification.add("────────────────────────────────────────────");
 
         if (violations.isEmpty() && restrictions.isEmpty()) {
-            justification.add("✅ TRASA ZATWIERDZONA - wszystkie obiekty mogą być bezpiecznie pokonane");
+            justification.add("✅ TRASA ZATWIERDZONA");
+            justification.add("   Wszystkie obiekty mogą być bezpiecznie pokonane");
         } else if (!violations.isEmpty()) {
-            justification.add("❌ TRASA ZABLOKOWANA - wykryto fizyczne przeszkody:");
+            justification.add("❌ TRASA ZABLOKOWANA");
             violations.forEach(v -> justification.add("   • " + v));
         } else if (!restrictions.isEmpty()) {
-            justification.add("⚠️ TRASA Z OGRANICZENIAMI - wymagana szczególna ostrożność:");
+            justification.add("⚠️ TRASA Z OGRANICZENIAMI");
             restrictions.forEach(r -> justification.add("   • " + r));
         }
 
@@ -523,11 +535,19 @@ public class GoogleMapsService {
 
         justification.add("");
         justification.add("╚════════════════════════════════════════════╝");
-        justification.add("  Źródła danych: OpenStreetMap, HERE Maps, Google Maps");
-        justification.add("  Data analizy: " + new Date());
+        justification.add("  Źródła: OpenStreetMap + Heurystyka (bez wielokrotnych API)");
+        justification.add("  Data: " + new Date());
         justification.add("╚════════════════════════════════════════════╝");
 
         return justification;
+    }
+
+    // Helper do obliczenia wagi naczepy
+    private int estimateSemiTrailerWeight(int cargoWeight) {
+        if (cargoWeight > 50000) return 15000;
+        if (cargoWeight > 30000) return 12000;
+        if (cargoWeight > 15000) return 10000;
+        return 8000;
     }
 
     private Map<String, Object> createTransportSetInfo(TransportSet transportSet) {
@@ -561,3 +581,4 @@ public class GoogleMapsService {
         return apiKeysConfig.isGoogleMapsEnabled();
     }
 }
+

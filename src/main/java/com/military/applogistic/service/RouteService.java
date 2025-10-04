@@ -6,14 +6,19 @@ import com.military.applogistic.repository.RouteRepository;
 import com.military.applogistic.repository.TransportSetRepository;
 import com.military.applogistic.dto.request.CreateRouteRequest;
 import com.military.applogistic.dto.response.RouteResponse;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static org.springframework.data.jpa.domain.AbstractPersistable_.id;
 
 @Service
 @RequiredArgsConstructor
@@ -392,6 +397,106 @@ public class RouteService {
         } catch (Exception e) {
             throw new RuntimeException("Failed to update route validation");
         }
+    }
+    // RouteService
+    public Map<String, Object> getValidationDetails(Long routeId) {
+        try {
+            Route route = routeRepository.findById(routeId)
+                    .orElseThrow(() -> new RuntimeException("Route not found"));
+
+            if (route.getRouteDataJson() == null || route.getRouteDataJson().equals("{}")) {
+                Map<String, Object> noDataResponse = new HashMap<>();
+                noDataResponse.put("routeId", routeId);
+                noDataResponse.put("validationAvailable", false);
+                noDataResponse.put("message", "Brak danych walidacji dla tej trasy");
+                return noDataResponse;
+            }
+
+            Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
+
+            Map<String, Object> validationDetails = new HashMap<>();
+            validationDetails.put("routeId", routeId);
+            validationDetails.put("validationAvailable", true);
+            validationDetails.put("validationSource", routeData.getOrDefault("validation_source", "unknown"));
+            validationDetails.put("hasRestrictions", routeData.getOrDefault("hasRestrictions", false));
+            validationDetails.put("hasWarnings", routeData.getOrDefault("hasWarnings", false));
+            validationDetails.put("hasViolations", routeData.getOrDefault("hasViolations", false));
+            validationDetails.put("warnings", routeData.getOrDefault("warnings", Collections.emptyList()));
+            validationDetails.put("restrictions", routeData.getOrDefault("restrictions", Collections.emptyList()));
+            validationDetails.put("violations", routeData.getOrDefault("violations", Collections.emptyList()));
+            validationDetails.put("validationDetails", routeData.getOrDefault("validationDetails", Collections.emptyList()));
+            validationDetails.put("transportSetInfo", routeData.getOrDefault("transportSet", Collections.emptyMap()));
+            validationDetails.put("routeJustification", routeData.getOrDefault("routeJustification", Collections.emptyList()));
+            validationDetails.put("searchAttempts", routeData.getOrDefault("searchAttempts", null));
+            validationDetails.put("successfulAttempt", routeData.getOrDefault("successfulAttempt", null));
+
+            return validationDetails;
+
+        } catch (Exception e) {
+            log.error("Błąd pobierania szczegółów walidacji: {}", e.getMessage());
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("routeId", routeId);
+            errorResponse.put("validationAvailable", false);
+            errorResponse.put("error", "Błąd podczas odczytu danych walidacji: " + e.getMessage());
+            return errorResponse;
+        }
+    }
+
+    public byte[] generateNavigationFile(Long routeId, String format) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+
+        if (route.getRouteDataJson() == null || route.getRouteDataJson().equals("{}")) {
+            throw new RuntimeException("Route has no navigation data");
+        }
+
+        try {
+            Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
+
+            // Tu możesz rozwinąć logikę → np. konwersja do GPX/KML
+            if ("gpx".equalsIgnoreCase(format)) {
+                return generateGpx(routeData).getBytes(StandardCharsets.UTF_8);
+            } else if ("kml".equalsIgnoreCase(format)) {
+                return generateKml(routeData).getBytes(StandardCharsets.UTF_8);
+            } else {
+                throw new RuntimeException("Unsupported format: " + format);
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error generating navigation file: " + e.getMessage(), e);
+        }
+    }
+
+    private String generateGpx(Map<String, Object> routeData) {
+        return """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gpx version="1.1" creator="MilitaryApp">
+              <trk>
+                <name>Military Route</name>
+                <trkseg>
+                  <!-- TODO: tu pętlą wygeneruj <trkpt lat="..." lon="..."/> -->
+                </trkseg>
+              </trk>
+            </gpx>
+            """;
+    }
+
+    private String generateKml(Map<String, Object> routeData) {
+        return """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <kml xmlns="http://www.opengis.net/kml/2.2">
+              <Document>
+                <name>Military Route</name>
+                <Placemark>
+                  <LineString>
+                    <coordinates>
+                      <!-- TODO: tu pętlą wygeneruj współrzędne -->
+                    </coordinates>
+                  </LineString>
+                </Placemark>
+              </Document>
+            </kml>
+            """;
     }
 
     public List<Map<String, Object>> getAlternativeRoutes(Long routeId) {

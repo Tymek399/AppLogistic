@@ -33,29 +33,88 @@ public class TransportSet {
             return;
         }
 
-        // ✅ STANDALONE: Pojazd jedzie sam bez naczepy
-        if (Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
+        // ✅ NOWA LOGIKA: Rozróżnienie między "może jechać sam" a "jedzie na lawecie"
+        boolean isOnTrailer = shouldBeOnTrailer();
+
+        if (!isOnTrailer && Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
+            // STANDALONE: Lekki pojazd jedzie sam (Humvee, Sprinter)
             this.totalWeightKg = cargo.getTotalWeightKg();
             this.totalHeightCm = cargo.getHeightCm();
             this.totalLengthCm = estimateStandaloneLength();
             this.totalWidthCm = estimateCargoWidth();
             this.maxAxleLoadKg = cargo.getMaxAxleLoadKg();
-            this.trailerHeightCm = 0; // Brak naczepy
+            this.trailerHeightCm = 0;
             return;
         }
 
-        // STANDARDOWY ZESTAW Z NACZEPĄ
+        // ZESTAW Z NACZEPĄ (ciężkie pojazdy lub transport długodystansowy)
         this.trailerHeightCm = estimateTrailerHeight(cargo.getTotalWeightKg());
         this.totalHeightCm = this.trailerHeightCm + (cargo.getHeightCm() != null ? cargo.getHeightCm() : 0);
 
-        int transporterWeight = transporter.getTotalWeightKg() != null ? transporter.getTotalWeightKg() : 0;
+        // Składowe masy
+        int tractorWeight = (int) (transporter.getTotalWeightKg() * 0.4); // Pusty ciągnik
         int cargoWeight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
         int semiTrailerWeight = estimateSemiTrailerWeight(cargoWeight);
-        this.totalWeightKg = transporterWeight + semiTrailerWeight + cargoWeight;
+
+        // ✅ POPRAWKA: Dodaj wagę ekwipunku bojowego dla pojazdów wojskowych
+        int militaryEquipmentWeight = estimateMilitaryEquipment(cargo.getModel());
+
+        this.totalWeightKg = tractorWeight + semiTrailerWeight + cargoWeight + militaryEquipmentWeight;
 
         this.maxAxleLoadKg = calculateMaxAxleLoad(this.totalWeightKg, getAxleCount());
         this.totalLengthCm = estimateTotalLength();
         this.totalWidthCm = Math.max(estimateTransporterWidth(), estimateCargoWidth());
+    }
+
+    /**
+     * ✅ NOWA METODA: Czy pojazd powinien jechać na lawecie?
+     */
+    private boolean shouldBeOnTrailer() {
+        String model = cargo.getModel().toLowerCase();
+        int weight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
+
+        // Pojazdy >5t ZAWSZE na lawecie (oszczędność paliwa + zużycia)
+        if (weight > 5000) {
+            return true;
+        }
+
+        // Pojazdy wojskowe gąsienicowe/ciężkie ZAWSZE na lawecie
+        if (model.contains("rosomak") ||
+                model.contains("leopard") ||
+                model.contains("krab") ||
+                model.contains("bwp") ||
+                model.contains("tank")) {
+            return true;
+        }
+
+        // Lekkie pojazdy kołowe mogą jechać same
+        return false;
+    }
+
+    /**
+     * ✅ NOWA METODA: Szacuj wagę ekwipunku bojowego
+     */
+    private int estimateMilitaryEquipment(String model) {
+        if (model == null) return 0;
+
+        String m = model.toLowerCase();
+
+        if (m.contains("rosomak")) {
+            // Załoga (8-10 osób) + amunicja + prowiant + paliwo dodatkowe
+            return 3000; // ~3t
+        }
+
+        if (m.contains("krab")) {
+            // Załoga + amunicja artyleryjska
+            return 5000; // ~5t
+        }
+
+        if (m.contains("leopard")) {
+            // Załoga + amunicja pancerna
+            return 8000; // ~8t (czołg bojowy)
+        }
+
+        return 0; // Pojazdy cywilne
     }
 
     private int estimateStandaloneLength() {
@@ -63,21 +122,23 @@ public class TransportSet {
         if (model.contains("rosomak")) return 730;
         if (model.contains("leopard")) return 1020;
         if (model.contains("krab")) return 920;
-        return 600; // domyślnie 6m
+        if (model.contains("humvee")) return 490;
+        if (model.contains("sprinter")) return 620;
+        return 600;
     }
 
     private int estimateTrailerHeight(Integer cargoWeight) {
         if (cargoWeight == null) return 120;
-        if (cargoWeight > 45000) return 80;
-        if (cargoWeight > 25000) return 120;
-        return 140;
+        if (cargoWeight > 45000) return 80;  // Niskopodwoziowa
+        if (cargoWeight > 25000) return 120; // Standardowa
+        return 140; // Lekka
     }
 
     private int estimateSemiTrailerWeight(int cargoWeight) {
-        if (cargoWeight > 50000) return 15000;
-        if (cargoWeight > 30000) return 12000;
-        if (cargoWeight > 15000) return 10000;
-        return 8000;
+        if (cargoWeight > 50000) return 15000; // Wzmocniona dla czołgów
+        if (cargoWeight > 30000) return 12000; // Ciężka
+        if (cargoWeight > 15000) return 10000; // Standardowa
+        return 8000; // Lekka
     }
 
     private int calculateMaxAxleLoad(int totalWeight, int axleCount) {
@@ -88,22 +149,22 @@ public class TransportSet {
 
     private int getAxleCount() {
         int cargoWeight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
-        int truckAxles = 3;
+        int truckAxles = 3; // Typowo 6x4 ciągnik
         int trailerAxles;
 
         if (cargoWeight > 50000) {
-            trailerAxles = 4;
+            trailerAxles = 4; // 4-osiowa dla czołgów
         } else if (cargoWeight > 30000) {
-            trailerAxles = 3;
+            trailerAxles = 3; // 3-osiowa
         } else {
-            trailerAxles = 2;
+            trailerAxles = 2; // Standardowa
         }
 
         return truckAxles + trailerAxles;
     }
 
     private int estimateTotalLength() {
-        int truckLength = 650;
+        int truckLength = 650; // Ciągnik 6x4
         String cargoModel = cargo.getModel().toLowerCase();
         int cargoLength = 1350;
 
@@ -115,7 +176,7 @@ public class TransportSet {
     }
 
     private int estimateTransporterWidth() {
-        return 255;
+        return 255; // 2.55m
     }
 
     private int estimateCargoWidth() {
@@ -124,6 +185,8 @@ public class TransportSet {
         if (model.contains("rosomak")) return 290;
         if (model.contains("krab")) return 340;
         if (model.contains("radar")) return 320;
+        if (model.contains("humvee")) return 220;
+        if (model.contains("sprinter")) return 200;
         return 255;
     }
 
@@ -165,7 +228,7 @@ public class TransportSet {
     }
 
     public String getTrailerType() {
-        if (Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
+        if (!shouldBeOnTrailer() && Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
             return "Pojazd samojezdny (bez naczepy)";
         }
         if (isLowLoader()) {
@@ -178,7 +241,7 @@ public class TransportSet {
     }
 
     public String getHeightBreakdown() {
-        if (Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
+        if (!shouldBeOnTrailer() && Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
             return String.format("Wysokość pojazdu: %dcm (jedzie samodzielnie)", getTotalHeightCm());
         }
         return String.format("Wysokość całkowita: %dcm (naczepa %dcm + ładunek %dcm)",

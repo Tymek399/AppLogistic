@@ -347,11 +347,11 @@ public class HereMapsService {
 
         // WAGA
         double weightT = transportSet.getTotalWeightKg() / 1000.0;
-        if (weightT > 60.0) {
+        if (weightT > 70.0) {
             justification.add("KRYTYCZNE: Masa > 60 ton");
             justification.add("   WYMAGA: Sprawdzenia nośności mostów");
             hasCriticalIssues = true;
-        } else if (weightT > 40.0) {
+        } else if (weightT > 50.0) {
             justification.add("UWAGA: Masa 40-60 ton");
             justification.add("   Drogi krajowe: OK (limit 60t)");
             justification.add("   Unikaj starych mostów (sprzed 1990)");

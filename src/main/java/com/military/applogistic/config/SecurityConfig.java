@@ -45,7 +45,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
 
                         // Navigation endpoint - WAŻNE!
-                        .requestMatchers("/navigation/*").permitAll()  // Tymczasowo publiczne
+                        .requestMatchers("/navigation/*").permitAll()
+                        .requestMatchers("/api/routes/*/navigation-file**").permitAll()
+
+                        // Tymczasowo publiczne
 
                         // API Config endpoints
                         .requestMatchers("/api/config/**").authenticated()

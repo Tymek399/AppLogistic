@@ -30,7 +30,7 @@ public class ApiKeysConfig {
     @Data
     public static class Tomtom {
         private String key = "";
-        private boolean enabled = false;
+        private boolean enabled = true;
         private String baseUrl = "https://api.tomtom.com/routing/1";
     }
 

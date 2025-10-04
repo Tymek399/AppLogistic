@@ -8,6 +8,7 @@ import com.military.applogistic.repository.DriverPositionRepository;
 import com.military.applogistic.repository.RouteRepository;
 import com.military.applogistic.dto.PositionUpdate;
 import com.military.applogistic.dto.LiveDriverInfo;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,7 @@ public class LiveTrackingService {
     private final DriverSessionRepository sessionRepository;
     private final DriverPositionRepository positionRepository;
     private final RouteRepository routeRepository;
+    private final SimpMessagingTemplate messagingTemplate;  // Added for broadcasting updates
 
     public void startDriverSession(String driverUsername, Long routeId) {
         // End any existing sessions for this driver
@@ -158,5 +160,18 @@ public class LiveTrackingService {
                         Math.sin(dLon/2) * Math.sin(dLon/2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return R * c;
+    }
+
+
+    public LiveDriverInfo getUpdatedDriverInfo(PositionUpdate position) {
+
+        String driverUsername = "placeholder_username";  // TODO: Implement proper username retrieval
+
+        updateDriverPosition(driverUsername, position);
+        LiveDriverInfo updatedInfo = getDriverStatus(driverUsername);
+
+        messagingTemplate.convertAndSend("/topic/driver-routes", updatedInfo);
+
+        return updatedInfo;
     }
 }

@@ -28,8 +28,6 @@ public class NavigationController {
 
         model.addAttribute("route", route);
         model.addAttribute("googleMapsKey", apiKeysConfig.getGoogleMaps().getKey());
-
-        // ✅ Dodaj pełną trasę Google Maps do modelu
         try {
             if (route.getRouteDataJson() != null && !route.getRouteDataJson().equals("{}")) {
                 Map<String, Object> routeData = objectMapper.readValue(

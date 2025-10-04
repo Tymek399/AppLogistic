@@ -5,6 +5,7 @@ import com.military.applogistic.service.RouteService;
 import com.military.applogistic.dto.request.CreateRouteRequest;
 import com.military.applogistic.dto.response.RouteResponse;
 import com.military.applogistic.repository.RouteRepository;
+import jakarta.annotation.security.PermitAll;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
@@ -84,6 +85,45 @@ public class RouteController {
                     .body(errorResponse);
         }
     }
+    @GetMapping("/{id}/navigation-file")
+    @PermitAll
+    public ResponseEntity<?> getNavigationFile(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "gpx") String format) {
+
+        try {
+            byte[] fileData = routeService.generateNavigationFile(id, format);
+
+            String contentType;
+            String fileName;
+
+            switch (format.toLowerCase()) {
+                case "gpx" -> {
+                    contentType = "application/gpx+xml";
+                    fileName = "route-" + id + ".gpx";
+                }
+                case "kml" -> {
+                    contentType = "application/vnd.google-earth.kml+xml";
+                    fileName = "route-" + id + ".kml";
+                }
+                default -> {
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Unsupported format: " + format));
+                }
+            }
+
+            return ResponseEntity.ok()
+                    .header("Content-Disposition", "attachment; filename=" + fileName)
+                    .header("Content-Type", contentType)
+                    .body(fileData);
+
+        } catch (RuntimeException e) {
+            log.error("Błąd generowania pliku nawigacyjnego: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
 
     // ✅ NOWY ENDPOINT - pełna trasa do nawigacji
     @GetMapping("/{id}/navigation-data")
@@ -156,51 +196,14 @@ public class RouteController {
         }
     }
 
+
     @GetMapping("/{id}/validation-details")
     @PreAuthorize("hasAnyRole('OPERATOR', 'DRIVER', 'ADMIN')")
     public ResponseEntity<Map<String, Object>> getValidationDetails(@PathVariable Long id) {
-        try {
-            Route route = routeRepository.findById(id)
-                    .orElseThrow(() -> new RuntimeException("Route not found"));
-
-            if (route.getRouteDataJson() == null || route.getRouteDataJson().equals("{}")) {
-                Map<String, Object> noDataResponse = new HashMap<>();
-                noDataResponse.put("routeId", id);
-                noDataResponse.put("validationAvailable", false);
-                noDataResponse.put("message", "Brak danych walidacji dla tej trasy");
-                return ResponseEntity.ok(noDataResponse);
-            }
-
-            Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
-
-            Map<String, Object> validationDetails = new HashMap<>();
-            validationDetails.put("routeId", id);
-            validationDetails.put("validationAvailable", true);
-            validationDetails.put("validationSource", routeData.getOrDefault("validation_source", "unknown"));
-            validationDetails.put("hasRestrictions", routeData.getOrDefault("hasRestrictions", false));
-            validationDetails.put("hasWarnings", routeData.getOrDefault("hasWarnings", false));
-            validationDetails.put("hasViolations", routeData.getOrDefault("hasViolations", false));
-            validationDetails.put("warnings", routeData.getOrDefault("warnings", Collections.emptyList()));
-            validationDetails.put("restrictions", routeData.getOrDefault("restrictions", Collections.emptyList()));
-            validationDetails.put("violations", routeData.getOrDefault("violations", Collections.emptyList()));
-            validationDetails.put("validationDetails", routeData.getOrDefault("validationDetails", Collections.emptyList()));
-            validationDetails.put("transportSetInfo", routeData.getOrDefault("transportSet", Collections.emptyMap()));
-            validationDetails.put("routeJustification", routeData.getOrDefault("routeJustification", Collections.emptyList()));
-
-            validationDetails.put("searchAttempts", routeData.get("searchAttempts"));
-            validationDetails.put("successfulAttempt", routeData.get("successfulAttempt"));
-
-            return ResponseEntity.ok(validationDetails);
-
-        } catch (Exception e) {
-            log.error("Błąd pobierania szczegółów walidacji: {}", e.getMessage());
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("routeId", id);
-            errorResponse.put("validationAvailable", false);
-            errorResponse.put("error", "Błąd podczas odczytu danych walidacji: " + e.getMessage());
-            return ResponseEntity.ok(errorResponse);
-        }
+        Map<String, Object> details = routeService.getValidationDetails(id);
+        return ResponseEntity.ok(details);
     }
+
 
     @PostMapping("/{routeId}/assign-driver")
     @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")

@@ -8,6 +8,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import lombok.RequiredArgsConstructor;
 import java.security.Principal;
 import java.util.List;
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.SendTo;
 
 @RestController
 @RequestMapping("/api/tracking")
@@ -49,5 +51,12 @@ public class LiveTrackingController {
     public ResponseEntity<LiveDriverInfo> getDriverStatus(@PathVariable String username) {
         LiveDriverInfo driverInfo = trackingService.getDriverStatus(username);
         return ResponseEntity.ok(driverInfo);
+    }
+
+    // WebSocket endpoint to broadcast driver position updates to operators
+    @MessageMapping("/route-update")
+    @SendTo("/topic/driver-routes")
+    public LiveDriverInfo broadcastRouteUpdate(PositionUpdate position) {
+        return trackingService.getUpdatedDriverInfo(position);
     }
 }
