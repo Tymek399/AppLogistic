@@ -51,7 +51,6 @@
     </div>
 </nav>
 
-
 <div class="container mt-4">
     <div class="row">
         <div class="col-md-12">
@@ -79,7 +78,7 @@
     const username = localStorage.getItem('username');
 
     // Inicjalizacja dashboard
-    document.addEventListener('DOMContentLoaded', function () {
+    document.addEventListener('DOMContentLoaded', function() {
         // Sprawdź autoryzację
         if (!token) {
             window.location.href = '/login.html';
@@ -98,7 +97,7 @@
     function setupAuth() {
         // Dodanie nagłówka autoryzacji do wszystkich requestów
         const originalFetch = window.fetch;
-        window.fetch = function (...args) {
+        window.fetch = function(...args) {
             if (args[1]) {
                 args[1].headers = {
                     ...args[1].headers,
@@ -290,25 +289,10 @@
 
     // ✅ Wymuś odświeżenie po utworzeniu trasy
     const originalLoadAllRoutes = operatorDashboard.loadAllRoutes;
-    operatorDashboard.loadAllRoutes = function () {
+    operatorDashboard.loadAllRoutes = function() {
         originalLoadAllRoutes.call(this);
         setTimeout(() => displayRoutesWithAllButtons(), 500);
     };
-    <a href="#" onClick="openInGoogleMaps(${route.id})" className="btn btn-success btn-sm mb-1">
-        🗺️ Otwórz w Google Maps
-    </a>
-    async function openInGoogleMaps(routeId) {
-        try {
-            const response = await fetch(`/api/routes/${routeId}/google-maps-url`);
-            const url = await response.text();
-
-            if (confirm('Otworzyć trasę w Google Maps?\n\nTrasa zawiera kluczowe punkty z walidacji.')) {
-                window.open(url, '_blank');
-            }
-        } catch (error) {
-            alert('Błąd: ' + error.message);
-        }
-    }
 </script>
 </body>
 </html>

@@ -11,8 +11,7 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * Serwis odpowiedzialny za generowanie plików nawigacyjnych (GPX, KML, Google Maps URL)
- * z zachowaniem zwalidowanej trasy
+ * Serwis odpowiedzialny za generowanie plików nawigacyjnych (GPX, KML)
  */
 @Service
 @RequiredArgsConstructor
@@ -20,7 +19,6 @@ import java.util.*;
 public class NavigationFileService {
 
     private final ObjectMapper objectMapper;
-    private static final int MAX_GOOGLE_WAYPOINTS = 8; // Google Maps limit ~10, zostawiamy bufor
 
     /**
      * Generuje plik nawigacyjny w wybranym formacie
@@ -35,9 +33,8 @@ public class NavigationFileService {
                     route.getRouteDataJson(), Map.class);
 
             return switch (format.toLowerCase()) {
-                case "gpx" -> generateGpx(routeData, route).getBytes(StandardCharsets.UTF_8);
-                case "kml" -> generateKml(routeData, route).getBytes(StandardCharsets.UTF_8);
-                case "googlemaps" -> generateGoogleMapsUrl(routeData, route).getBytes(StandardCharsets.UTF_8);
+                case "gpx" -> generateGpx(routeData).getBytes(StandardCharsets.UTF_8);
+                case "kml" -> generateKml(routeData).getBytes(StandardCharsets.UTF_8);
                 default -> throw new RuntimeException("Unsupported format: " + format);
             };
 
@@ -47,139 +44,9 @@ public class NavigationFileService {
     }
 
     /**
-     * Generuje URL do Google Maps z waypointami z zwalidowanej trasy
+     * Generuje plik GPX
      */
-    private String generateGoogleMapsUrl(Map<String, Object> routeData, Route route) {
-        List<double[]> coordinates = extractCoordinates(routeData);
-
-        if (coordinates.isEmpty()) {
-            log.warn("No coordinates found in route data, using start/end only");
-            return String.format(
-                    "https://www.google.com/maps/dir/%f,%f/%f,%f",
-                    route.getStartLatitude(), route.getStartLongitude(),
-                    route.getEndLatitude(), route.getEndLongitude()
-            );
-        }
-
-        // Wybierz kluczowe punkty trasy (waypoints)
-        List<double[]> waypoints = selectKeyWaypoints(coordinates, MAX_GOOGLE_WAYPOINTS);
-
-        StringBuilder url = new StringBuilder("https://www.google.com/maps/dir/");
-
-        // Start
-        url.append(route.getStartLatitude()).append(",").append(route.getStartLongitude());
-
-        // Waypoints
-        for (double[] wp : waypoints) {
-            url.append("/").append(String.format(Locale.US, "%.6f,%.6f", wp[0], wp[1]));
-        }
-
-        // End
-        url.append("/").append(route.getEndLatitude()).append(",").append(route.getEndLongitude());
-
-        log.info("Generated Google Maps URL with {} waypoints", waypoints.size());
-        return url.toString();
-    }
-
-    /**
-     * Wybiera kluczowe punkty z trasy (waypoints) dla Google Maps
-     * Strategia: równomierne rozmieszczenie punktów + kluczowe zakręty
-     */
-    private List<double[]> selectKeyWaypoints(List<double[]> allCoordinates, int maxPoints) {
-        if (allCoordinates.size() <= maxPoints) {
-            return allCoordinates.subList(1, allCoordinates.size() - 1); // bez start/end
-        }
-
-        List<double[]> waypoints = new ArrayList<>();
-
-        // Strategia 1: Równomierne rozmieszczenie
-        int step = allCoordinates.size() / (maxPoints + 1);
-        for (int i = step; i < allCoordinates.size() - step; i += step) {
-            if (waypoints.size() < maxPoints) {
-                waypoints.add(allCoordinates.get(i));
-            }
-        }
-
-        // Strategia 2: Dodaj punkty ze znaczącymi zmianami kierunku
-        List<double[]> turningPoints = findTurningPoints(allCoordinates);
-        for (double[] tp : turningPoints) {
-            if (waypoints.size() >= maxPoints) break;
-            if (!containsPoint(waypoints, tp)) {
-                waypoints.add(tp);
-            }
-        }
-
-        log.debug("Selected {} waypoints from {} total points", waypoints.size(), allCoordinates.size());
-        return waypoints.subList(0, Math.min(waypoints.size(), maxPoints));
-    }
-
-    /**
-     * Znajduje punkty ze znaczącymi zmianami kierunku (zakręty)
-     */
-    private List<double[]> findTurningPoints(List<double[]> coordinates) {
-        List<double[]> turningPoints = new ArrayList<>();
-
-        for (int i = 1; i < coordinates.size() - 1; i++) {
-            double[] prev = coordinates.get(i - 1);
-            double[] curr = coordinates.get(i);
-            double[] next = coordinates.get(i + 1);
-
-            // Oblicz kąt
-            double angle = calculateAngle(prev, curr, next);
-
-            // Jeśli kąt > 30 stopni, to znaczący zakręt
-            if (Math.abs(angle) > 30) {
-                turningPoints.add(curr);
-            }
-        }
-
-        return turningPoints;
-    }
-
-    /**
-     * Oblicza kąt między trzema punktami (w stopniach)
-     */
-    private double calculateAngle(double[] p1, double[] p2, double[] p3) {
-        double bearing1 = calculateBearing(p1[0], p1[1], p2[0], p2[1]);
-        double bearing2 = calculateBearing(p2[0], p2[1], p3[0], p3[1]);
-
-        double angle = bearing2 - bearing1;
-
-        // Normalizuj do [-180, 180]
-        while (angle > 180) angle -= 360;
-        while (angle < -180) angle += 360;
-
-        return angle;
-    }
-
-    /**
-     * Oblicza bearing (azymut) między dwoma punktami
-     */
-    private double calculateBearing(double lat1, double lon1, double lat2, double lon2) {
-        double dLon = Math.toRadians(lon2 - lon1);
-        double y = Math.sin(dLon) * Math.cos(Math.toRadians(lat2));
-        double x = Math.cos(Math.toRadians(lat1)) * Math.sin(Math.toRadians(lat2)) -
-                Math.sin(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.cos(dLon);
-
-        return Math.toDegrees(Math.atan2(y, x));
-    }
-
-    /**
-     * Sprawdza czy lista zawiera dany punkt
-     */
-    private boolean containsPoint(List<double[]> points, double[] point) {
-        for (double[] p : points) {
-            if (Math.abs(p[0] - point[0]) < 0.0001 && Math.abs(p[1] - point[1]) < 0.0001) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Generuje plik GPX z pełną trasą
-     */
-    private String generateGpx(Map<String, Object> routeData, Route route) {
+    private String generateGpx(Map<String, Object> routeData) {
         StringBuilder gpx = new StringBuilder();
 
         // Header
@@ -192,26 +59,13 @@ public class NavigationFileService {
 
         // Metadata
         gpx.append("  <metadata>\n");
-        gpx.append("    <name>Trasa #").append(route.getId()).append(" - Zwalidowana</name>\n");
-        gpx.append("    <desc>").append(route.getStartAddress()).append(" → ")
-                .append(route.getEndAddress()).append("</desc>\n");
+        gpx.append("    <name>Military Route</name>\n");
         gpx.append("    <time>").append(Instant.now().toString()).append("</time>\n");
-
-        // Dodaj informacje o walidacji
-        if (routeData.containsKey("hasRestrictions") || routeData.containsKey("warnings")) {
-            gpx.append("    <keywords>military,validated");
-            if (Boolean.TRUE.equals(routeData.get("hasRestrictions"))) {
-                gpx.append(",restrictions");
-            }
-            gpx.append("</keywords>\n");
-        }
-
         gpx.append("  </metadata>\n");
 
         // Track
         gpx.append("  <trk>\n");
-        gpx.append("    <name>Trasa militarna #").append(route.getId()).append("</name>\n");
-        gpx.append("    <type>validated-military-route</type>\n");
+        gpx.append("    <name>Transport Route</name>\n");
         gpx.append("    <trkseg>\n");
 
         List<double[]> coordinates = extractCoordinates(routeData);
@@ -223,18 +77,6 @@ public class NavigationFileService {
 
         gpx.append("    </trkseg>\n");
         gpx.append("  </trk>\n");
-
-        // Dodaj waypoints dla kluczowych punktów
-        List<double[]> waypoints = selectKeyWaypoints(coordinates, MAX_GOOGLE_WAYPOINTS);
-        for (int i = 0; i < waypoints.size(); i++) {
-            double[] wp = waypoints.get(i);
-            gpx.append(String.format(Locale.US,
-                    "  <wpt lat=\"%.6f\" lon=\"%.6f\">\n", wp[0], wp[1]));
-            gpx.append("    <name>WP").append(i + 1).append("</name>\n");
-            gpx.append("    <desc>Kluczowy punkt trasy</desc>\n");
-            gpx.append("  </wpt>\n");
-        }
-
         gpx.append("</gpx>");
 
         return gpx.toString();
@@ -243,15 +85,15 @@ public class NavigationFileService {
     /**
      * Generuje plik KML
      */
-    private String generateKml(Map<String, Object> routeData, Route route) {
+    private String generateKml(Map<String, Object> routeData) {
         StringBuilder kml = new StringBuilder();
 
         // Header
         kml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         kml.append("<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n");
         kml.append("  <Document>\n");
-        kml.append("    <name>Trasa #").append(route.getId()).append("</name>\n");
-        kml.append("    <description>Zwalidowana trasa militarna</description>\n");
+        kml.append("    <name>Military Route</name>\n");
+        kml.append("    <description>Transport route for military logistics</description>\n");
 
         // Style
         kml.append("    <Style id=\"routeStyle\">\n");
@@ -263,7 +105,7 @@ public class NavigationFileService {
 
         // Placemark
         kml.append("    <Placemark>\n");
-        kml.append("      <name>Trasa militarna</name>\n");
+        kml.append("      <name>Transport Route</name>\n");
         kml.append("      <styleUrl>#routeStyle</styleUrl>\n");
         kml.append("      <LineString>\n");
         kml.append("        <tessellate>1</tessellate>\n");

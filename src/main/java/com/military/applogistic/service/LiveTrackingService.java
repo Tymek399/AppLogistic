@@ -176,7 +176,6 @@ public class LiveTrackingService {
         return pos != null && pos.getLastUpdateTime().isAfter(LocalDateTime.now().minusMinutes(1));
     }
 
-
     private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
         double R = 6371;
         double dLat = Math.toRadians(lat2 - lat1);
