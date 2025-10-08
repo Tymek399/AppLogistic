@@ -14,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/admin/user")
+@RequestMapping("/api/admin/users")
 @RequiredArgsConstructor
 @Slf4j
 public class AdminController {

@@ -55,4 +55,5 @@ public class LiveTrackingController {
     public LiveDriverInfo broadcastRouteUpdate(PositionUpdate position) {
         return trackingService.getUpdatedDriverInfo(position);
     }
+
 }
