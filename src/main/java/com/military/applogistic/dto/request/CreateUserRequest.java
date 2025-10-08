@@ -6,7 +6,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Data
 public class CreateUserRequest {
+
     private String username;
+    //todo to od razu fronted powienien zmieniac na hasha !!!!!
     private String password;
     private String email;
     private String role;

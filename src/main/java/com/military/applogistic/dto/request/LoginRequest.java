@@ -5,5 +5,6 @@ import lombok.Data;
 @Data
 public class LoginRequest {
     private String username;
+    //todo frontend wysyla hash nie haslo w stringu czyste
     private String password;
 }

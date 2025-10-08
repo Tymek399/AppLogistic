@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -97,6 +96,39 @@
 
         .driver-online { color: #28a745; font-weight: bold; }
         .driver-offline { color: #6c757d; }
+
+        /* NOWE STYLE DLA WYBORU TYPU TRANSPORTU */
+        .transport-mode-selector {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .transport-mode-option {
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .transport-mode-option:hover {
+            border-color: #0d6efd;
+            background: #f0f8ff;
+        }
+
+        .transport-mode-option.selected {
+            border-color: #0d6efd;
+            background: #e7f3ff;
+        }
+
+        .transport-mode-icon {
+            font-size: 2em;
+            margin-right: 10px;
+        }
     </style>
 </head>
 <body>
@@ -230,10 +262,34 @@
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Ładunek</label>
-                                <select id="cargo-select" class="form-select" required>
+                                <select id="cargo-select" class="form-select" required onchange="checkCargoCapabilities()">
                                     <option value="">Ładowanie...</option>
                                 </select>
                             </div>
+
+                            <!-- ✅ NOWA SEKCJA - WYBÓR TYPU TRANSPORTU -->
+                            <div class="transport-mode-selector" id="transport-mode-container" style="display:none;">
+                                <label class="form-label"><strong>Typ transportu:</strong></label>
+
+                                <div class="transport-mode-option" data-mode="trailer" onclick="selectTransportMode('trailer')">
+                                    <span class="transport-mode-icon">🚛</span>
+                                    <div style="display: inline-block; vertical-align: top;">
+                                        <strong>Na lawecie (naczepa)</strong><br>
+                                        <small>Oszczędność zużycia pojazdu, bezpieczny transport na długie dystanse</small>
+                                    </div>
+                                </div>
+
+                                <div class="transport-mode-option" data-mode="self" onclick="selectTransportMode('self')">
+                                    <span class="transport-mode-icon">🚗</span>
+                                    <div style="display: inline-block; vertical-align: top;">
+                                        <strong>Na własnych kołach</strong><br>
+                                        <small>Pojazd jedzie samodzielnie, szybszy dojazd na krótkie dystanse</small>
+                                    </div>
+                                </div>
+
+                                <input type="hidden" id="transport-mode" value="trailer">
+                            </div>
+
                             <div class="mb-3">
                                 <label class="form-label">Opis</label>
                                 <input type="text" id="set-description" class="form-control"
@@ -343,6 +399,10 @@
     let googleMapsLoaded = false;
     const token = localStorage.getItem('token');
 
+    // ✅ ZMIENNE GLOBALNE DLA WYBORU TYPU TRANSPORTU
+    let allCargo = [];
+    let selectedTransportMode = 'trailer';
+
     if (!token) window.location.href = '/login.html';
 
     const originalFetch = window.fetch;
@@ -354,6 +414,44 @@
         }
         return originalFetch.apply(this, args);
     };
+
+    // ✅ NOWE FUNKCJE DLA WYBORU TYPU TRANSPORTU
+    function checkCargoCapabilities() {
+        const cargoId = document.getElementById('cargo-select').value;
+        const container = document.getElementById('transport-mode-container');
+
+        if (!cargoId) {
+            container.style.display = 'none';
+            return;
+        }
+
+        const cargo = allCargo.find(c => c.id == cargoId);
+        if (!cargo) {
+            container.style.display = 'none';
+            return;
+        }
+
+        // Pokaż opcje tylko jeśli pojazd MOŻE jechać sam
+        if (cargo.canDriveAlone && cargo.totalWeightKg <= 5000) {
+            container.style.display = 'block';
+            // Domyślnie wybierz lawetę
+            selectTransportMode('trailer');
+        } else {
+            container.style.display = 'none';
+            selectedTransportMode = 'trailer';
+        }
+    }
+
+    function selectTransportMode(mode) {
+        selectedTransportMode = mode;
+        document.getElementById('transport-mode').value = mode;
+
+        // Wizualna aktualizacja
+        document.querySelectorAll('.transport-mode-option').forEach(el => {
+            el.classList.remove('selected');
+        });
+        document.querySelector(`[data-mode="${mode}"]`).classList.add('selected');
+    }
 
     async function initializeSystem() {
         try {
@@ -463,13 +561,13 @@
         if (validation && validation.validationAvailable) {
             html += '<div class="mt-2">';
             if (!validation.hasViolations && !validation.hasRestrictions) {
-                html += '<span class="validation-badge badge-clear">Trasa czysta</span>';
+                html += '<span class="validation-badge badge-clear">✅ Trasa sprawdzona i bezpieczna</span>';
             }
             if (validation.hasRestrictions) {
-                html += '<span class="validation-badge badge-warning">Ograniczenia sprawdzone</span>';
+                html += '<span class="validation-badge badge-warning">⚠️ Ograniczenia sprawdzone</span>';
             }
             if (validation.hasViolations) {
-                html += '<span class="validation-badge badge-danger">Użyto trasy alternatywnej</span>';
+                html += '<span class="validation-badge badge-danger">🔄 Użyto trasy alternatywnej</span>';
             }
             html += '</div>';
         }
@@ -534,7 +632,7 @@
             html += `
                 <div class="mt-3">
                     <button class="btn btn-sm btn-outline-primary" onclick="toggleJustification(${route.id})">
-                        Dlaczego wybrano tę trasę? (Mosty/Tunele/Drogi)
+                        📋 Dlaczego wybrano tę trasę? (Mosty/Tunele/Drogi)
                     </button>
                     <div id="justification-${route.id}" class="justification-box" style="display:none;">
             `;
@@ -544,7 +642,7 @@
                     html += `<div style="font-weight:bold;color:#0d6efd;border-bottom:2px solid #0d6efd;padding:5px 0;margin-top:10px;">${escapeHtml(line)}</div>`;
                 } else {
                     let className = '';
-                    if (line.includes('MOŻNA PRZEJECHAĆ') || line.includes('udźwignie') || line.includes('✓')) {
+                    if (line.includes('MOŻNA PRZEJECHAĆ') || line.includes('udźwignie') || line.includes('✔')) {
                         className = 'style="color:#28a745;font-weight:bold;background:#d4edda;padding:6px;border-radius:4px;margin:4px 0;"';
                     } else if (line.includes('OMIJAMY') || line.includes('ZA CIĘŻKI') || line.includes('ZA WYSOKI')) {
                         className = 'style="color:#dc3545;font-weight:bold;background:#f8d7da;padding:6px;border-radius:4px;margin:4px 0;"';
@@ -621,10 +719,10 @@
                 if (line.includes('═══')) {
                     style += 'font-weight:bold;color:#0d6efd;font-size:1.15em;border-bottom:2px solid #0d6efd;padding:8px 0;margin-top:15px;';
                 }
-                else if (line.includes('MOŻNA PRZEJECHAĆ') || line.includes('udźwignie') || line.includes('ZATWIERDZONA') || line.includes('✓')) {
+                else if (line.includes('MOŻNA PRZEJECHAĆ') || line.includes('udźwignie') || line.includes('ZATWIERDZONA') || line.includes('✔')) {
                     style += 'color:#28a745;font-weight:bold;background:#d4edda;padding:8px;border-radius:5px;margin:5px 0;';
                 }
-                else if (line.includes('OMIJAMY') || line.includes('ZA CIĘŻKI') || line.includes('ZA WYSOKI') || line.includes('NARUSZENIE') || line.includes('❌')) {
+                else if (line.includes('OMIJAMY') || line.includes('ZA CIĘŻKI') || line.includes('ZA WYSOKI') || line.includes('NARUSZENIE') || line.includes('✗')) {
                     style += 'color:#dc3545;font-weight:bold;background:#f8d7da;padding:8px;border-radius:5px;margin:5px 0;';
                 }
                 else if (line.includes('⚠') || line.includes('UWAGA') || line.includes('OGRANICZENIE')) {
@@ -664,7 +762,7 @@
 
         if (!validation.hasViolations && !validation.hasRestrictions) {
             html += '<div style="background:#d4edda;border-left:4px solid #28a745;padding:15px;margin-top:20px;border-radius:5px;">';
-            html += '<h6 style="color:#155724;"><strong>Trasa wolna od ograniczeń!</strong></h6>';
+            html += '<h6 style="color:#155724;"><strong>✅ Trasa wolna od ograniczeń!</strong></h6>';
             html += '<p>Wszystkie mosty, tunele i drogi zostały sprawdzone i są przejezdne dla tego zestawu.</p>';
             html += '</div>';
         }
@@ -722,11 +820,14 @@
                 fetch('/api/vehicles/transport-sets').then(r => r.json())
             ]);
 
+            // ✅ Zapisz cargo globalnie
+            allCargo = cargo;
+
             document.getElementById('transporter-select').innerHTML = '<option value="">Wybierz...</option>' +
                 transporters.map(t => `<option value="${t.id}">${t.model} (${t.totalWeightKg}kg)</option>`).join('');
 
             document.getElementById('cargo-select').innerHTML = '<option value="">Wybierz...</option>' +
-                cargo.map(c => `<option value="${c.id}">${c.model} (${c.totalWeightKg}kg, ${c.heightCm}cm)</option>`).join('');
+                cargo.map(c => `<option value="${c.id}">${c.model} (${c.totalWeightKg}kg, ${c.heightCm}cm)${c.canDriveAlone ? ' 🚗' : ''}</option>`).join('');
 
             document.getElementById('existing-sets').innerHTML = sets.map(set => `
                 <div class="card mb-2">
@@ -734,6 +835,7 @@
                         <h6>${set.description || 'Zestaw #' + set.id}</h6>
                         <small>Ciężarówka: ${set.transporter.model}</small><br>
                         <small>Ładunek: ${set.cargo.model}</small><br>
+                        <small>Typ: ${set.trailerType || 'N/A'}</small><br>
                         <small>Waga: ${set.totalWeightKg}kg</small><br>
                         <small>Wysokość: ${set.totalHeightCm}cm</small>
                     </div>
@@ -754,13 +856,16 @@
                 body: JSON.stringify({
                     transporterId: document.getElementById('transporter-select').value,
                     cargoId: document.getElementById('cargo-select').value,
-                    description: document.getElementById('set-description').value
+                    description: document.getElementById('set-description').value,
+                    transportMode: selectedTransportMode  // ✅ Dodaj wybrany tryb
                 })
             });
 
             if (response.ok) {
                 alert('Zestaw utworzony!');
                 document.getElementById('vehicle-form').reset();
+                document.getElementById('transport-mode-container').style.display = 'none';
+                selectedTransportMode = 'trailer';
                 loadVehiclesTab();
                 if (operatorDashboard?.loadTransportSets) operatorDashboard.loadTransportSets();
             }
@@ -843,7 +948,7 @@
             document.getElementById('cargo-list').innerHTML = cargo.map(c => `
                 <div class="card mb-2">
                     <div class="card-body p-2">
-                        <strong>${c.model}</strong><br>
+                        <strong>${c.model}</strong> ${c.canDriveAlone ? '🚗' : ''}<br>
                         <small>Waga: ${c.totalWeightKg}kg, Wys: ${c.heightCm}cm</small>
                     </div>
                 </div>

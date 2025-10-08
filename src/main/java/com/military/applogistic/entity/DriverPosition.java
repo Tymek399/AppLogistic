@@ -16,12 +16,17 @@ public class DriverPosition {
     @JoinColumn(name = "route_id")
     private Route route;
 
+    //todo jak nazwa ma wiecej niz jeden wyraz to robimy adnocajre z podlaga
+    //todo uzywaj referaceNumber
+    @Column(name = "driver_username")
     private String driverUsername;
+
+    //todo latniej bedzie stworzyc obiekt ktory bedzie reprezentowal lokalizacje niz dodawac wszystkie pola osobno
     private Double latitude;
     private Double longitude;
     private Double speedKmh;
-    private Integer accuracy; // GPS accuracy in meters
-    private Integer batteryLevel;
+    private Double accuracy; // GPS accuracy in meters
+    private Double batteryLevel;
     private Boolean isOnline = true;
     private LocalDateTime lastUpdateTime = LocalDateTime.now();
 }

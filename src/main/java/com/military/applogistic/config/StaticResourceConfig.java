@@ -19,7 +19,6 @@ public class StaticResourceConfig implements WebMvcConfigurer {
 
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
-        // Mapowanie głównej strony
         registry.addViewController("/").setViewName("forward:/index.html");
     }
 }

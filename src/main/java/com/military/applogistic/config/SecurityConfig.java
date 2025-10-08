@@ -29,7 +29,6 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Strony HTML - PUBLICZNE (bo autoryzacja jest w JS)
                         .requestMatchers("/", "/index.html", "/login.html").permitAll()
                         .requestMatchers("/driver-dashboard.html", "/operator-dashboard.html").permitAll()
                         .requestMatchers("/navigation.html").permitAll()

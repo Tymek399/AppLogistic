@@ -17,6 +17,7 @@ import lombok.Data;
         private String lastName;
         private boolean active;
 
+        //toto wyjeb to do mapperow i zrob buildera
         public static UserResponse from(User user) {
             return new UserResponse(
                     user.getId(),

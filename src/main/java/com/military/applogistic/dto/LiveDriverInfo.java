@@ -7,7 +7,9 @@ import java.time.LocalDateTime;
 @Data
 @Builder
 public class LiveDriverInfo {
+
     private String driverUsername;
+    //todo jakie kurawa id bazodanowe
     private Long routeId;
     private String routeDescription;
     private Double latitude;

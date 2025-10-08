@@ -8,6 +8,7 @@ import java.util.List;
 
 @Repository
 public interface DriverPositionRepository extends JpaRepository<DriverPosition, Long> {
+    //todo juz widze jak ci to dziala dobrze zrob z tego query
     Optional<DriverPosition> findTopByDriverUsernameOrderByLastUpdateTimeDesc(String driverUsername);
     List<DriverPosition> findByDriverUsernameOrderByLastUpdateTimeDesc(String driverUsername);
 }

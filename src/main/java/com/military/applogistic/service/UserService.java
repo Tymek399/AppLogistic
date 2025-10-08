@@ -36,7 +36,7 @@ public class UserService {
     public List<UserResponse> getAllUsers() {
         log.info("Retrieving all users");
         return userRepository.findAll().stream()
-                .map(UserResponse::from)  // zakładamy, że UserResponse ma statyczną metodę from(User user)
+                .map(UserResponse::from)
                 .toList();
     }
 

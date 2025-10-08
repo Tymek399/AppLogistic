@@ -2,12 +2,13 @@ package com.military.applogistic.config;
 
 import com.military.applogistic.entity.*;
 import com.military.applogistic.repository.*;
+import com.military.applogistic.service.TransportSetCalculator;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import java.time.LocalDateTime;
 
 @Component
 @RequiredArgsConstructor
@@ -19,9 +20,17 @@ public class DataLoader implements CommandLineRunner {
     private final TransportSetRepository transportSetRepository;
     private final RouteRepository routeRepository;
     private final PasswordEncoder passwordEncoder;
+    private final TransportSetCalculator transportSetCalculator;
+
+    @Value("${data.loader.enabled:true}")
+    private boolean enabled;
 
     @Override
     public void run(String... args) throws Exception {
+        if (!enabled) {
+            log.info("Data loader disabled for this environment");
+            return;
+        }
         loadInitialData();
     }
 
@@ -79,73 +88,87 @@ public class DataLoader implements CommandLineRunner {
     private void createVehicles() {
         // CIĄGNIKI (DMC = maksymalna masa z ładunkiem, nie masa pustego ciągnika!)
         Vehicle truck1 = new Vehicle();
+        truck1.setReferenceNumber("TRK-001");
         truck1.setModel("MAN TGX 26.480");
         truck1.setType(Vehicle.VehicleType.TRANSPORTER);
         truck1.setTotalWeightKg(26000); // DMC - 40% to ~10.4t pustego ciągnika
         truck1.setHeightCm(350);
         truck1.setMaxAxleLoadKg(11500);
+        truck1.setActive(true);
         truck1.setCanDriveAlone(false);
         truck1.setVehicleCategory("TRUCK");
         vehicleRepository.save(truck1);
 
         Vehicle truck2 = new Vehicle();
+        truck2.setReferenceNumber("TRK-002");
         truck2.setModel("Mercedes Actros 2545");
         truck2.setType(Vehicle.VehicleType.TRANSPORTER);
         truck2.setTotalWeightKg(25000); // DMC
         truck2.setHeightCm(340);
         truck2.setMaxAxleLoadKg(11000);
+        truck2.setActive(true);
         truck2.setCanDriveAlone(false);
         truck2.setVehicleCategory("TRUCK");
         vehicleRepository.save(truck2);
 
         // ŁADUNKI NA NACZEPĘ (ciężkie)
         Vehicle tank1 = new Vehicle();
+        tank1.setReferenceNumber("CRG-001");
         tank1.setModel("Leopard 2A5");
         tank1.setType(Vehicle.VehicleType.CARGO);
         tank1.setTotalWeightKg(62000);
         tank1.setHeightCm(300);
         tank1.setMaxAxleLoadKg(15500);
+        tank1.setActive(true);
         tank1.setCanDriveAlone(false);
         tank1.setVehicleCategory("MILITARY_VEHICLE");
         vehicleRepository.save(tank1);
 
         Vehicle howitzer1 = new Vehicle();
+        howitzer1.setReferenceNumber("CRG-002");
         howitzer1.setModel("AHS Krab");
         howitzer1.setType(Vehicle.VehicleType.CARGO);
         howitzer1.setTotalWeightKg(48000);
         howitzer1.setHeightCm(320);
         howitzer1.setMaxAxleLoadKg(12000);
+        howitzer1.setActive(true);
         howitzer1.setCanDriveAlone(false);
         howitzer1.setVehicleCategory("MILITARY_VEHICLE");
         vehicleRepository.save(howitzer1);
 
         // POJAZDY STANDALONE
         Vehicle rosomak = new Vehicle();
+        rosomak.setReferenceNumber("CRG-003");
         rosomak.setModel("KTO Rosomak");
         rosomak.setType(Vehicle.VehicleType.CARGO);
         rosomak.setTotalWeightKg(22000);
         rosomak.setHeightCm(280);
         rosomak.setMaxAxleLoadKg(8000);
+        rosomak.setActive(true);
         rosomak.setCanDriveAlone(true);
         rosomak.setVehicleCategory("STANDALONE");
         vehicleRepository.save(rosomak);
 
         Vehicle sprinter = new Vehicle();
+        sprinter.setReferenceNumber("CRG-004");
         sprinter.setModel("Mercedes Sprinter 516 CDI");
         sprinter.setType(Vehicle.VehicleType.CARGO);
         sprinter.setTotalWeightKg(3500);
         sprinter.setHeightCm(270);
         sprinter.setMaxAxleLoadKg(1750);
+        sprinter.setActive(true);
         sprinter.setCanDriveAlone(true);
         sprinter.setVehicleCategory("STANDALONE");
         vehicleRepository.save(sprinter);
 
         Vehicle humvee = new Vehicle();
+        humvee.setReferenceNumber("CRG-005");
         humvee.setModel("HMMWV Humvee");
         humvee.setType(Vehicle.VehicleType.CARGO);
         humvee.setTotalWeightKg(4500);
         humvee.setHeightCm(185);
         humvee.setMaxAxleLoadKg(2250);
+        humvee.setActive(true);
         humvee.setCanDriveAlone(true);
         humvee.setVehicleCategory("STANDALONE");
         vehicleRepository.save(humvee);
@@ -183,7 +206,7 @@ public class DataLoader implements CommandLineRunner {
             set1.setTransporter(manTruck);
             set1.setCargo(leopard);
             set1.setDescription("Transport czołgu Leopard 2A5");
-            set1.calculateTransportParameters();
+            transportSetCalculator.calculateTransportParameters(set1);
             transportSetRepository.save(set1);
 
             log.info("Utworzono: {}", set1.getDescription());
@@ -199,7 +222,7 @@ public class DataLoader implements CommandLineRunner {
             set2.setTransporter(manTruck);
             set2.setCargo(rosomak);
             set2.setDescription("KTO Rosomak - samojezdny");
-            set2.calculateTransportParameters();
+            transportSetCalculator.calculateTransportParameters(set2);
             transportSetRepository.save(set2);
 
             log.info("Utworzono: {}", set2.getDescription());
@@ -212,7 +235,7 @@ public class DataLoader implements CommandLineRunner {
             set3.setTransporter(manTruck);
             set3.setCargo(sprinter);
             set3.setDescription("Sprinter - lekki (auto-akceptacja)");
-            set3.calculateTransportParameters();
+            transportSetCalculator.calculateTransportParameters(set3);
             transportSetRepository.save(set3);
 
             log.info("Utworzono: {}", set3.getDescription());

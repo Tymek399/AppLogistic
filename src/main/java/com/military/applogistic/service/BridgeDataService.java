@@ -1,7 +1,8 @@
 package com.military.applogistic.service;
 
 import com.military.applogistic.entity.TransportSet;
-import com.military.applogistic.service.OverpassService.InfrastructurePoint;
+import com.military.applogistic.service.api.OverpassService;
+import com.military.applogistic.service.api.OverpassService.InfrastructurePoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

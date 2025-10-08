@@ -4,7 +4,9 @@ import lombok.Data;
 
 @Data
 public class CreateTransportSetRequest {
-    private Long transporterId;
-    private Long cargoId;
+    private String transporterReferenceNumber;
+    private String cargoReferenceNumber;
     private String description;
+
+    private TransportMode transportMode; // TRAILER or SELF
 }
