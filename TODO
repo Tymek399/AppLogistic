@@ -1,0 +1,18 @@
+Wyjeb komentarze
+Wyjeb emotki
+Dodac security Keycloka
+Podziel oddzielnie fronted backend dodaj security miedzy nimi systemy maja działać niezależnie jako dwa docker file
+Secutiry z keycloka ma tez pobierac uprawnienia i sprawdzac endpoint
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+takie adnotacje dodajemy nad klasami encji oraz dto nie uzywamy @Data !!!!
+baseentity i envers albo inne gowno do zapisywania historii
+encje w trakcie developmentu niech maja id long pozniej masz zrobic UUID
+metody publiczne powinny byc male i nie skapliowane reszte nalezy wrzucic w serwisach w metody prytwane aby ich logika nie wyciekla dalej
+nie rob klas wewnetrz innych klas dodawaj je jako oddzielne pliki
+
+dodaj cach do polaczen do zewnetrznych serwisow zeby nie pobierac tych samych danych caly czas
+limity na api tez spoko
