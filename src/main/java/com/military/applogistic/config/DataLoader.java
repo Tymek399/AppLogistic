@@ -2,7 +2,8 @@ package com.military.applogistic.config;
 
 import com.military.applogistic.entity.*;
 import com.military.applogistic.repository.*;
-import com.military.applogistic.service.TransportSetCalculator;
+import com.military.applogistic.repository.user.UserRepository;
+import com.military.applogistic.service.transport.TransportSetCalculator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;

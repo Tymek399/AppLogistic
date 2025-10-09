@@ -1,7 +1,7 @@
 package com.military.applogistic.security;
 
 import com.military.applogistic.entity.User;
-import com.military.applogistic.repository.UserRepository;
+import com.military.applogistic.repository.user.UserRepository;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;

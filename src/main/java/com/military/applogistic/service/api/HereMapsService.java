@@ -555,3 +555,4 @@ public class HereMapsService {
         return apiKeysConfig.isHereMapsEnabled() ? "configured" : "not_configured";
     }
 }
+

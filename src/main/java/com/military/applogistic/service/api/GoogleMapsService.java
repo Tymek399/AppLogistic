@@ -2,9 +2,8 @@ package com.military.applogistic.service.api;
 
 import com.military.applogistic.config.ApiKeysConfig;
 import com.military.applogistic.entity.TransportSet;
-import com.military.applogistic.service.BridgeDataService;
-import com.military.applogistic.service.MilitaryLoadCalculator;
-import com.military.applogistic.service.TransportSetCalculator;
+import com.military.applogistic.service.transport.MilitaryLoadCalculator;
+import com.military.applogistic.service.transport.TransportSetCalculator;
 import com.military.applogistic.service.api.OverpassService.InfrastructurePoint;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -52,7 +51,7 @@ public class GoogleMapsService {
 
             // 1. Google Maps - JEDNA trasa
             Map<String, Object> googleResponse = performGoogleMapsApiCall(
-                    startAddress, endAddress, excludedBridges, false // <-- false = nie omijaj płatnych dróg
+                    startAddress, endAddress, excludedBridges
             );
 
             routeCache.put(cacheKey, googleResponse);
@@ -135,18 +134,28 @@ public class GoogleMapsService {
     }
 
     private Map<String, Object> performGoogleMapsApiCall(
-            String startAddress, String endAddress, Set<String> excludedBridges, boolean avoidTolls) {
-
-        String avoidParam = avoidTolls ? "&avoid=tolls" : "";
+            String startAddress, String endAddress, Set<String> excludedBridges) {
 
         String url = String.format(
-                "%s/directions/json?origin=%s&destination=%s&key=%s&mode=driving&alternatives=true&language=pl&region=pl%s",
+                "%s/directions/json?origin=%s&destination=%s&key=%s"
+                        + "&mode=driving"
+                        + "&alternatives=true"
+                        + "&language=pl"
+                        + "&region=pl"
+                        + "&departure_time=now"
+                        + "&traffic_model=best_guess"
+                        + "&avoid=none"
+                        + "&transit_routing_preference=less_walking"
+                        + "&driving_preference=less_fuel"
+                        + "&optimizeWaypoints=true"
+                        + "%s",
                 apiKeysConfig.getGoogleMaps().getBaseUrl(),
                 encodeAddress(startAddress),
                 encodeAddress(endAddress),
                 apiKeysConfig.getGoogleMaps().getKey(),
-                avoidParam
+                "" // brak avoid – niczego nie unikamy
         );
+
 
         log.info("📡 Calling Google Maps Directions API");
 
@@ -251,6 +260,11 @@ public class GoogleMapsService {
         return path;
     }
 
+    /**
+     * Łączy dane z Google Maps, OpenStreetMap i HERE Maps w jeden spójny obiekt trasy.
+     * KLUCZOWA ZMIANA: Teraz kopiuje polilinię i instrukcje z HERE Maps, jeśli są dostępne,
+     * aby zapewnić, że zapisywana trasa jest tą samą, która została pomyślnie zwalidowana.
+     */
     private Map<String, Object> combineAllValidations(
             Map<String, Object> googleRoute,
             List<InfrastructurePoint> osmInfrastructure,
@@ -285,7 +299,44 @@ public class GoogleMapsService {
 
         // HERE Maps validation
         if (hereValidation != null) {
+            log.info("🔧 DEBUG: Otrzymano odpowiedź z HERE Maps. Sprawdzam strukturę..."); // NOWY LOG
             mergeValidationData(hereValidation, allWarnings, allRestrictions, allViolations);
+
+            // >>>>>>>>>> POPRAWKA Z DODATKOWYMI LOGAMI <<<<<<<<<<
+            if (hereValidation.containsKey("routes")) {
+                log.info("🔧 DEBUG: Klucz 'routes' znaleziony."); // NOWY LOG
+                List<?> routesList = (List<?>) hereValidation.get("routes");
+                if (routesList != null && !routesList.isEmpty()) {
+                    log.info("🔧 DEBUG: Lista 'routes' nie jest pusta, rozmiar: {}", routesList.size()); // NOWY LOG
+                    Map<String, Object> hereRoute = (Map<String, Object>) routesList.get(0);
+                    if (hereRoute.containsKey("sections")) {
+                        log.info("🔧 DEBUG: Klucz 'sections' znaleziony w pierwszej trasie."); // NOWY LOG
+                        List<?> sectionsList = (List<?>) hereRoute.get("sections");
+                        if (sectionsList != null && !sectionsList.isEmpty()) {
+                            log.info("🔧 DEBUG: Lista 'sections' nie jest pusta, rozmiar: {}", sectionsList.size()); // NOWY LOG
+                            Map<String, Object> section = (Map<String, Object>) sectionsList.get(0);
+                            if (section.containsKey("polyline")) {
+                                String herePolyline = (String) section.get("polyline");
+                                combined.put("polyline", herePolyline);
+                                combined.put("herePolyline", herePolyline);
+                                log.info("✅ Przekazano polilinię z HERE Maps do trasy"); // TEN LOG POWINIEN SIĘ POJAWIĆ
+                            } else {
+                                log.warn("🔧 DEBUG: Brak klucza 'polyline' w sekcji!"); // NOWY LOG
+                            }
+                        } else {
+                            log.warn("🔧 DEBUG: Lista 'sections' jest pusta lub null!"); // NOWY LOG
+                        }
+                    } else {
+                        log.warn("🔧 DEBUG: Brak klucza 'sections' w trasie!"); // NOWY LOG
+                    }
+                } else {
+                    log.warn("🔧 DEBUG: Lista 'routes' jest pusta lub null!"); // NOWY LOG
+                }
+            } else {
+                log.warn("🔧 DEBUG: Brak klucza 'routes' w odpowiedzi HERE!"); // NOWY LOG
+            }
+        } else {
+            log.warn("🔧 DEBUG: Odpowiedź z HERE Maps (hereValidation) jest null!"); // NOWY LOG
         }
 
         List<String> routeJustification = buildDetailedJustification(

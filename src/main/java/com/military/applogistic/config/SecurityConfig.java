@@ -53,7 +53,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/config/**").authenticated()
 
                         // API z tokenem
-                        .requestMatchers("/api/**").authenticated()
+                        .requestMatchers("/api/admin/**").authenticated()
 
                         // Reszta
                         .anyRequest().authenticated()
