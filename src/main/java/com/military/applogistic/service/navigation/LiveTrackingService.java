@@ -1,4 +1,4 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.navigation;
 
 import com.military.applogistic.dto.LiveDriverInfo;
 import com.military.applogistic.dto.PositionUpdate;
@@ -8,8 +8,8 @@ import com.military.applogistic.entity.Route;
 import com.military.applogistic.entity.RouteStatus;
 import com.military.applogistic.mapper.DriverPositionMapper;
 import com.military.applogistic.mapper.LiveTrackingMapper;
-import com.military.applogistic.repository.DriverPositionRepository;
-import com.military.applogistic.repository.DriverSessionRepository;
+import com.military.applogistic.repository.user.DriverPositionRepository;
+import com.military.applogistic.repository.user.DriverSessionRepository;
 import com.military.applogistic.repository.RouteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

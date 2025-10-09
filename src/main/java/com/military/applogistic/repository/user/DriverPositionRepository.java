@@ -1,4 +1,4 @@
-package com.military.applogistic.repository;
+package com.military.applogistic.repository.user;
 
 import com.military.applogistic.entity.DriverPosition;
 import org.springframework.data.jpa.repository.JpaRepository;

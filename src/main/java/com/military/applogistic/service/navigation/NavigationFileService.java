@@ -1,4 +1,4 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.navigation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.military.applogistic.entity.Route;

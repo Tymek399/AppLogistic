@@ -1,4 +1,4 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.transport;
 
 import com.military.applogistic.entity.TransportSet;
 import com.military.applogistic.entity.Vehicle;

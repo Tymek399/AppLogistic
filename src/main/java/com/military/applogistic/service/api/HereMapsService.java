@@ -2,7 +2,7 @@ package com.military.applogistic.service.api;
 
 import com.military.applogistic.config.ApiKeysConfig;
 import com.military.applogistic.entity.TransportSet;
-import com.military.applogistic.service.TransportSetCalculator;
+import com.military.applogistic.service.transport.TransportSetCalculator;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import lombok.RequiredArgsConstructor;

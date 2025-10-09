@@ -1,4 +1,4 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.config;
 
 import com.military.applogistic.dto.request.LoginRequest;
 import com.military.applogistic.dto.response.LoginResponse;

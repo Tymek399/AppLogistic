@@ -2,9 +2,8 @@ package com.military.applogistic.service.api;
 
 import com.military.applogistic.config.ApiKeysConfig;
 import com.military.applogistic.entity.TransportSet;
-import com.military.applogistic.service.BridgeDataService;
-import com.military.applogistic.service.MilitaryLoadCalculator;
-import com.military.applogistic.service.TransportSetCalculator;
+import com.military.applogistic.service.transport.MilitaryLoadCalculator;
+import com.military.applogistic.service.transport.TransportSetCalculator;
 import com.military.applogistic.service.api.OverpassService.InfrastructurePoint;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -52,7 +51,7 @@ public class GoogleMapsService {
 
             // 1. Google Maps - JEDNA trasa
             Map<String, Object> googleResponse = performGoogleMapsApiCall(
-                    startAddress, endAddress, excludedBridges, false // <-- false = nie omijaj płatnych dróg
+                    startAddress, endAddress, excludedBridges
             );
 
             routeCache.put(cacheKey, googleResponse);
@@ -135,18 +134,28 @@ public class GoogleMapsService {
     }
 
     private Map<String, Object> performGoogleMapsApiCall(
-            String startAddress, String endAddress, Set<String> excludedBridges, boolean avoidTolls) {
-
-        String avoidParam = avoidTolls ? "&avoid=tolls" : "";
+            String startAddress, String endAddress, Set<String> excludedBridges) {
 
         String url = String.format(
-                "%s/directions/json?origin=%s&destination=%s&key=%s&mode=driving&alternatives=true&language=pl&region=pl%s",
+                "%s/directions/json?origin=%s&destination=%s&key=%s"
+                        + "&mode=driving"
+                        + "&alternatives=true"
+                        + "&language=pl"
+                        + "&region=pl"
+                        + "&departure_time=now"
+                        + "&traffic_model=best_guess"
+                        + "&avoid=none"
+                        + "&transit_routing_preference=less_walking"
+                        + "&driving_preference=less_fuel"
+                        + "&optimizeWaypoints=true"
+                        + "%s",
                 apiKeysConfig.getGoogleMaps().getBaseUrl(),
                 encodeAddress(startAddress),
                 encodeAddress(endAddress),
                 apiKeysConfig.getGoogleMaps().getKey(),
-                avoidParam
+                "" // brak avoid – niczego nie unikamy
         );
+
 
         log.info("📡 Calling Google Maps Directions API");
 

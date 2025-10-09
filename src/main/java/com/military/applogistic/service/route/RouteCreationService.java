@@ -1,4 +1,4 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.route;
 
 import com.military.applogistic.dto.request.CreateRouteRequest;
 import com.military.applogistic.dto.response.RouteResponse;
@@ -21,7 +21,7 @@ import java.util.*;
 @Slf4j
 public class RouteCreationService {
 
-    private static final int MAX_ROUTE_ATTEMPTS = 10;
+    private static final int MAX_ROUTE_ATTEMPTS = 20;
 
     private final GoogleMapsService googleMapsService;
     private final RouteRepository routeRepository;

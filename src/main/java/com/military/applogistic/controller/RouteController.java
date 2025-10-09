@@ -2,7 +2,7 @@ package com.military.applogistic.controller;
 
 import com.military.applogistic.dto.request.CreateRouteRequest;
 import com.military.applogistic.dto.response.RouteResponse;
-import com.military.applogistic.service.RouteService;
+import com.military.applogistic.service.route.RouteService;
 import jakarta.annotation.security.PermitAll;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;

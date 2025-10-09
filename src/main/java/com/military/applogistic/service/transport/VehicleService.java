@@ -1,8 +1,7 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.transport;
 
 import com.military.applogistic.dto.request.CreateTransportSetRequest;
 import com.military.applogistic.dto.request.CreateVehicleRequest;
-import com.military.applogistic.dto.request.TransportMode;
 import com.military.applogistic.entity.TransportSet;
 import com.military.applogistic.entity.Vehicle;
 import com.military.applogistic.mapper.TransportSetMapper;

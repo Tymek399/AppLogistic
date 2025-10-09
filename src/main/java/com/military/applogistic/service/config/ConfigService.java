@@ -1,4 +1,4 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.config;
 
 import com.military.applogistic.config.ApiKeysConfig;
 import lombok.RequiredArgsConstructor;

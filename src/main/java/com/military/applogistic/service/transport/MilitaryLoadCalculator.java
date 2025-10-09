@@ -1,4 +1,4 @@
-package com.military.applogistic.service;
+package com.military.applogistic.service.transport;
 
 import lombok.Data;
 import lombok.Builder;
