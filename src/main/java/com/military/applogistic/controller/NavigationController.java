@@ -1,7 +1,7 @@
 package com.military.applogistic.controller;
 
 import com.military.applogistic.entity.Route;
-import com.military.applogistic.service.navigation.NavigationService;
+import com.military.applogistic.service.NavigationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Controller;

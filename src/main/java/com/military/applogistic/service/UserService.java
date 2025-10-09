@@ -3,7 +3,7 @@ package com.military.applogistic.service;
 import com.military.applogistic.dto.request.CreateUserRequest;
 import com.military.applogistic.dto.response.UserResponse;
 import com.military.applogistic.entity.User;
-import com.military.applogistic.repository.user.UserRepository;
+import com.military.applogistic.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;

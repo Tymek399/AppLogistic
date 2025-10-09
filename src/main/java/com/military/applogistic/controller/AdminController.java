@@ -2,7 +2,8 @@ package com.military.applogistic.controller;
 
 import com.military.applogistic.dto.request.CreateUserRequest;
 import com.military.applogistic.dto.response.UserResponse;
-import com.military.applogistic.repository.user.UserRepository;
+import com.military.applogistic.entity.User;
+import com.military.applogistic.repository.UserRepository;
 import com.military.applogistic.service.UserService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/admin")
+@RequestMapping("/api/admin/user")
 @RequiredArgsConstructor
 @Slf4j
 public class AdminController {
@@ -22,14 +23,14 @@ public class AdminController {
     private final UserService userService;
     private final PasswordEncoder passwordEncoder;
 
-    @PostMapping("/users")
+    @PostMapping("/")
     @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
     public ResponseEntity<UserResponse> createUser(@RequestBody CreateUserRequest request) {
         UserResponse createdUser = userService.createUser(request);
         return ResponseEntity.ok(createdUser);
     }
 
-    @GetMapping("/users")
+    @GetMapping("/")
     @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
     public ResponseEntity<List<UserResponse>> getAllUsers() {
         List<UserResponse> users = userService.getAllUsers();
@@ -37,14 +38,14 @@ public class AdminController {
     }
 
 
-    @GetMapping("/users/drivers")
+    @GetMapping("/drivers")
     @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
     public ResponseEntity<List<UserResponse>> getDrivers() {
         List<UserResponse> users = userService.getDrivers();
         return ResponseEntity.ok(users);
     }
 
-    @DeleteMapping("/users/{username}")
+    @DeleteMapping("/{username}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> deleteUser(@PathVariable String username) {
         userService.deleteUser(username);

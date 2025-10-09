@@ -2,7 +2,7 @@ package com.military.applogistic.controller;
 
 import com.military.applogistic.dto.LiveDriverInfo;
 import com.military.applogistic.dto.PositionUpdate;
-import com.military.applogistic.service.navigation.LiveTrackingService;
+import com.military.applogistic.service.LiveTrackingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;

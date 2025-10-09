@@ -1,6 +1,6 @@
 package com.military.applogistic.controller;
 
-import com.military.applogistic.service.config.ConfigService;
+import com.military.applogistic.service.ConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;

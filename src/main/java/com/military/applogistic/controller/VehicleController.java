@@ -4,7 +4,7 @@ import com.military.applogistic.dto.request.CreateTransportSetRequest;
 import com.military.applogistic.dto.request.CreateVehicleRequest;
 import com.military.applogistic.entity.TransportSet;
 import com.military.applogistic.entity.Vehicle;
-import com.military.applogistic.service.transport.VehicleService;
+import com.military.applogistic.service.VehicleService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;

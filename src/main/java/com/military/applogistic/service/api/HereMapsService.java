@@ -2,7 +2,6 @@ package com.military.applogistic.service.api;
 
 import com.military.applogistic.config.ApiKeysConfig;
 import com.military.applogistic.entity.TransportSet;
-import com.military.applogistic.service.transport.TransportSetCalculator;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +17,6 @@ public class HereMapsService {
     private final ApiKeysConfig apiKeysConfig;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final TransportSetCalculator transportSetCalculator;
 
     public Map<String, Object> validateRouteRestrictions(double startLat, double startLng,
                                                          double endLat, double endLng,
@@ -306,7 +304,7 @@ public class HereMapsService {
         justification.add(String.format("Opis: %s", transportSet.getDescription()));
         justification.add(String.format("Ciężarówka: %s", transportSet.getTransporter().getModel()));
         justification.add(String.format("Ładunek: %s", transportSet.getCargo().getModel()));
-        justification.add(String.format("Typ naczepy: %s", transportSetCalculator.getTrailerType(transportSet)));
+        justification.add(String.format("Typ naczepy: %s", transportSet.getTrailerType()));
         justification.add("");
         justification.add("Wymiary i parametry:");
         justification.add(String.format("  Masa całkowita: %.1f ton", transportSet.getTotalWeightKg() / 1000.0));

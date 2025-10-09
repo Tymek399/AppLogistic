@@ -56,7 +56,10 @@ api:
     key: Gf-TtmVV8nyo6-9tc6QYw4twU2cVA-jE58SxM2jw3po
     enabled: true
     base-url: https://router.hereapi.com/v8
-
+  tom-tom:
+    enabled: true
+    key: w6LQqpqeOt0ITFzFHbeOzUjOqnN8alPu
+    base-url: https://api.tomtom.com/routing/1
 # JWT
 jwt:
   secret: mySecretKey1234567890abcdefghijklmnopqrstuvwxyz123456789012345678901234567890
