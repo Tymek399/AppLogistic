@@ -1,4 +1,4 @@
-package com.military.applogistic.repository.user;
+package com.military.applogistic.repository;
 
 import com.military.applogistic.entity.DriverSession;
 import org.springframework.data.jpa.repository.JpaRepository;

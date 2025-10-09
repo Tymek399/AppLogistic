@@ -11,28 +11,22 @@ public class Vehicle {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true)
-    private String referenceNumber;
-
+    @Column(nullable = false)
     private String model;
 
     @Enumerated(EnumType.STRING)
     private VehicleType type;
 
     private Integer totalWeightKg;
-
     private Integer heightCm;
-
     private Integer maxAxleLoadKg;
+    private Boolean active = true;
 
-    private Boolean active;
-
-    private Boolean canDriveAlone;
-
-    private String vehicleCategory;
+    // NOWE POLA
+    private Boolean canDriveAlone = false; // Czy może jechać solo bez naczepy
+    private String vehicleCategory; // "TRUCK", "MILITARY_VEHICLE", "STANDALONE"
 
     public enum VehicleType {
-        TRANSPORTER,
-        CARGO
+        TRANSPORTER, CARGO
     }
 }

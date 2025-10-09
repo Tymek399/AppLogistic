@@ -20,11 +20,8 @@ public class DriverSession {
     @JoinColumn(name = "route_id")
     private Route activeRoute;
 
-
     private String sessionToken = UUID.randomUUID().toString();
-    //todo to zalatwic ci historia baseauditable audyt do encji ma to zrobic nie ty
     private LocalDateTime loginTime = LocalDateTime.now();
     private LocalDateTime lastActivityTime = LocalDateTime.now();
-    // todo jakie kurwa ustawnianei na sztywno pola !!!!
     private Boolean isActive = true;
 }

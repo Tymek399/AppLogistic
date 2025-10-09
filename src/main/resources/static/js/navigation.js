@@ -11,22 +11,12 @@ class NavigationSystem {
         this.routePolyline = null;
         this.token = localStorage.getItem('token');
         this.updateInterval = null;
-        this.username = localStorage.getItem('username');
-        this.stompClient = null;
-        this.socket = null;
 
         this.init();
     }
 
     init() {
         if (!this.token) {
-            window.location.href = '/login.html';
-            return;
-        }
-
-        if (!this.username) {
-            this.showError('Brak nazwy użytkownika. Zaloguj się ponownie.');
-            localStorage.clear();
             window.location.href = '/login.html';
             return;
         }
@@ -62,265 +52,423 @@ class NavigationSystem {
             return;
         }
 
-        const centerPoint = this.routeData.startLatitude && this.routeData.startLongitude
-            ? { lat: this.routeData.startLatitude, lng: this.routeData.startLongitude }
-            : { lat: 52.2297, lng: 21.0122 };
+        // Get route coordinates from global variables or defaults
+        const startLat = window.startLat || 52.2297;
+        const startLng = window.startLng || 21.0122;
+        const endLat = window.endLat || 52.4064;
+        const endLng = window.endLng || 16.9252;
+        const startAddress = window.startAddress || 'Start';
+        const endAddress = window.endAddress || 'End';
+
+        // Center map on route
+        const centerLat = (startLat + endLat) / 2;
+        const centerLng = (startLng + endLng) / 2;
 
         this.map = new google.maps.Map(document.getElementById('map'), {
-            center: centerPoint,
-            zoom: 12,
-            mapTypeId: 'roadmap'
+            zoom: 10,
+            center: { lat: centerLat, lng: centerLng }
         });
 
-        this.loadRoutePolyline();
-        this.loadWaypoints();
+        // Start marker
+        new google.maps.Marker({
+            position: { lat: startLat, lng: startLng },
+            map: this.map,
+            title: `Start: ${startAddress}`,
+            icon: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png'
+        });
+
+        // End marker
+        new google.maps.Marker({
+            position: { lat: endLat, lng: endLng },
+            map: this.map,
+            title: `Koniec: ${endAddress}`,
+            icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+        });
+
+        // Route line
+        this.routePolyline = new google.maps.Polyline({
+            path: [
+                { lat: startLat, lng: startLng },
+                { lat: endLat, lng: endLng }
+            ],
+            geodesic: true,
+            strokeColor: '#FF0000',
+            strokeOpacity: 1.0,
+            strokeWeight: 3
+        });
+        this.routePolyline.setMap(this.map);
+
+        // Fit map to route bounds
+        const bounds = new google.maps.LatLngBounds();
+        bounds.extend({ lat: startLat, lng: startLng });
+        bounds.extend({ lat: endLat, lng: endLng });
+        this.map.fitBounds(bounds);
+
+        console.log('Navigation map initialized');
     }
 
-    connectWebSocket() {
-        if (typeof SockJS === 'undefined' || typeof Stomp === 'undefined') {
-            this.showError('Brak bibliotek SockJS lub Stomp.js. Śledzenie na żywo nie działa.');
+    setupEventListeners() {
+        const startBtn = document.getElementById('start-tracking');
+        const stopBtn = document.getElementById('stop-tracking');
+        const centerBtn = document.getElementById('center-map');
+
+        if (startBtn) {
+            startBtn.addEventListener('click', () => this.startTracking());
+        }
+
+        if (stopBtn) {
+            stopBtn.addEventListener('click', () => this.stopTracking());
+        }
+
+        if (centerBtn) {
+            centerBtn.addEventListener('click', () => this.centerMapOnPosition());
+        }
+    }
+
+    async startTracking() {
+        if (!navigator.geolocation) {
+            this.showError('Geolokalizacja nie jest obsługiwana przez tę przeglądarkę.');
             return;
         }
 
-        this.socket = new SockJS('/ws');
-        this.stompClient = Stomp.over(this.socket);
-        this.stompClient.debug = null;
+        this.updateStatus('Łączenie...', 'offline');
 
-        const headers = {
-            'Authorization': `Bearer ${this.token}`
-        };
-
-        this.stompClient.connect(headers, frame => {
-            console.log('Połączono z serwerem śledzenia.');
-        }, error => {
-            this.showError('Błąd połączenia z serwerem śledzenia.');
-            console.error('STOMP Error:', error);
-        });
-    }
-
-    startTracking() {
-        if (!this.routeId) {
-            this.showError('Brak przypisanej trasy. Nie można rozpocząć śledzenia.');
-            return;
-        }
-        if (this.isTracking) return;
-
-        this.connectWebSocket();
-
-        fetch(`/api/tracking/start-session?routeId=${this.routeId}`, { method: 'POST' })
-            .then(response => {
-                if (!response.ok) throw new Error('Nie udało się rozpocząć sesji w backendzie.');
-                this.showSuccess('Sesja nawigacyjna rozpoczęta.');
-            })
-            .catch(e => {
-                this.showError('Błąd rozpoczęcia sesji: ' + e.message);
-                return;
+        try {
+            // Login to tracking session
+            const response = await fetch(`/api/tracking/login?routeId=${this.routeId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
             });
 
-        this.watchId = navigator.geolocation.watchPosition(
-            (position) => this.handlePositionUpdate(position),
-            (error) => this.handleGeolocationError(error),
-            { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
-        );
+            if (!response.ok) {
+                throw new Error('Błąd logowania do sesji');
+            }
 
-        this.isTracking = true;
-        document.getElementById('start-btn').disabled = true;
-        document.getElementById('stop-btn').disabled = false;
-        this.showSuccess('Śledzenie i wysyłanie pozycji rozpoczęte!');
-    }
-
-    stopTracking() {
-        if (!this.isTracking) return;
-
-        navigator.geolocation.clearWatch(this.watchId);
-        this.isTracking = false;
-
-        if (this.stompClient) {
-            this.stompClient.disconnect(() => {
-                console.log('STOMP disconnected for driver.');
-            });
-        }
-
-        fetch(`/api/tracking/end-session`, { method: 'POST' })
-            .then(response => {
-                if (response.ok) {
-                    this.showSuccess('Sesja nawigacyjna zakończona.');
+            // Start GPS tracking
+            this.watchId = navigator.geolocation.watchPosition(
+                (position) => this.handlePositionUpdate(position),
+                (error) => this.handlePositionError(error),
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 5000
                 }
-            })
-            .catch(e => {
-                this.showError('Błąd kończenia sesji: ' + e.message);
-            });
+            );
 
-        document.getElementById('start-btn').disabled = false;
-        document.getElementById('stop-btn').disabled = true;
+            this.isTracking = true;
+            this.updateButtonStates();
+            this.updateStatus('GPS Aktywny', 'online');
+
+            // Start periodic updates
+            this.startPeriodicUpdates();
+
+        } catch (error) {
+            console.error('Error starting tracking:', error);
+            this.updateStatus('Błąd logowania', 'offline');
+            this.showError('Nie można uruchomić nawigacji. Sprawdź połączenie.');
+        }
+    }
+
+    async stopTracking() {
+        if (this.watchId) {
+            navigator.geolocation.clearWatch(this.watchId);
+            this.watchId = null;
+        }
+
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
+        }
+
+        try {
+            await fetch('/api/tracking/logout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } catch (error) {
+            console.error('Error logging out:', error);
+        }
+
+        this.isTracking = false;
+        this.updateButtonStates();
+        this.updateStatus('GPS Nieaktywny', 'offline');
     }
 
     handlePositionUpdate(position) {
-        this.currentPosition = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
+        const positionData = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            speedKmh: position.coords.speed ? position.coords.speed * 3.6 : 0,
+            accuracy: position.coords.accuracy,
+            batteryLevel: null,
+            timestamp: new Date().toISOString()
         };
 
-        this.updateMapMarker(this.currentPosition);
-
-        if (this.stompClient && this.stompClient.connected) {
-            const positionUpdate = {
-                username: this.username,
-                latitude: this.currentPosition.lat,
-                longitude: this.currentPosition.lng,
-                routeId: this.routeId
-            };
-
-            this.stompClient.send("/app/route-update", {}, JSON.stringify(positionUpdate));
-            console.log(`Pozycja wysłana: ${this.currentPosition.lat}, ${this.currentPosition.lng}`);
-        } else {
-            console.warn('Nie można wysłać pozycji - WebSocket niepołączony.');
-        }
-
-        this.checkRouteCompletion(this.currentPosition);
-    }
-
-    handleGeolocationError(error) {
-        this.showError('Błąd geolokalizacji: ' + error.message);
-        console.error('Geolocation Error:', error);
-    }
-
-    updateMapMarker(position) {
-        if (!this.map) return;
-
-        if (this.currentMarker) {
-            this.currentMarker.setPosition(position);
-        } else {
-            this.currentMarker = new google.maps.Marker({
-                position: position,
-                map: this.map,
-                icon: {
-                    url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
-                    scaledSize: new google.maps.Size(32, 32)
-                }
+        // Try to get battery level
+        if ('getBattery' in navigator) {
+            navigator.getBattery().then(battery => {
+                positionData.batteryLevel = Math.round(battery.level * 100);
+                this.updateBatteryDisplay(positionData.batteryLevel);
+            }).catch(() => {
+                // Battery API not available
             });
         }
-        this.map.setCenter(position);
+
+        // Send position to backend
+        this.sendPositionUpdate(positionData);
+
+        // Update UI and map
+        this.updateUI(positionData);
+        this.updateMapPosition(positionData);
     }
 
-    checkRouteCompletion(position) {
-        const endLat = this.routeData.endLatitude;
-        const endLng = this.routeData.endLongitude;
+    async sendPositionUpdate(positionData) {
+        try {
+            const response = await fetch('/api/tracking/position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(positionData)
+            });
 
-        if (!endLat || !endLng) return;
+            if (!response.ok) {
+                console.warn('Failed to send position update');
+            }
+        } catch (error) {
+            console.error('Error sending position:', error);
+        }
+    }
 
-        const distance = this.calculateDistance(position.lat, position.lng, endLat, endLng);
-        const distanceKm = distance;
+    updateUI(position) {
+        this.updateElement('speed', `Prędkość: ${Math.round(position.speedKmh)} km/h`);
+        this.updateElement('accuracy', `Dokładność: ${Math.round(position.accuracy)}m`);
 
-        if (distanceKm < 0.5) {
-            document.getElementById('instruction-text').textContent = 'Jesteś blisko celu (mniej niż 500m)!';
+        // Update connection status
+        this.updateStatus('GPS Aktywny', 'online');
+    }
+
+    updateMapPosition(position) {
+        this.currentPosition = {
+            lat: position.latitude,
+            lng: position.longitude
+        };
+
+        // Remove old marker
+        if (this.currentMarker) {
+            this.currentMarker.setMap(null);
         }
 
-        if (distanceKm < 0.1) {
-            this.showSuccess('TRASA ZAKOŃCZONA!');
-            this.stopTracking();
+        // Add current position marker
+        this.currentMarker = new google.maps.Marker({
+            position: this.currentPosition,
+            map: this.map,
+            title: 'Twoja pozycja',
+            icon: {
+                url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+                scaledSize: new google.maps.Size(32, 32)
+            }
+        });
+
+        // Check if close to destination
+        this.checkDestinationProximity(position);
+    }
+
+    checkDestinationProximity(position) {
+        const endLat = window.endLat || 52.4064;
+        const endLng = window.endLng || 16.9252;
+
+        const distance = this.calculateDistance(
+            position.latitude, position.longitude,
+            endLat, endLng
+        );
+
+        // If within 100 meters of destination
+        if (distance < 0.1) {
+            this.showSuccess('Dotarłeś do celu!');
+            // Optionally complete the route automatically
+            // this.completeRoute();
         }
     }
 
     calculateDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const R = 6371; // Earth radius in km
+        const dLat = this.toRadians(lat2 - lat1);
+        const dLon = this.toRadians(lon2 - lon1);
         const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.cos(this.toRadians(lat1)) * Math.cos(this.toRadians(lat2)) *
             Math.sin(dLon/2) * Math.sin(dLon/2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
     }
 
-    loadRoutePolyline() {
-        try {
-            const routes = this.routeData.routeDataJson ? JSON.parse(this.routeData.routeDataJson).routes : [];
-            if (routes.length === 0) return;
-
-            const encodedPolyline = routes[0].overview_polyline.points;
-            if (!encodedPolyline) return;
-
-            const path = google.maps.geometry.encoding.decodePath(encodedPolyline);
-
-            this.routePolyline = new google.maps.Polyline({
-                path: path,
-                geodesic: true,
-                strokeColor: '#0000FF',
-                strokeOpacity: 0.8,
-                strokeWeight: 6
-            });
-
-            this.routePolyline.setMap(this.map);
-
-        } catch (e) {
-            console.error('Błąd ładowania polilinii trasy:', e);
-        }
+    toRadians(degrees) {
+        return degrees * (Math.PI/180);
     }
 
-    loadWaypoints() {
-        try {
-            const routeJson = this.routeData.routeDataJson ? JSON.parse(this.routeData.routeDataJson) : {};
-            const excludedInfrastructure = routeJson.excluded_infrastructure || [];
-
-            excludedInfrastructure.forEach(item => {
-                const parts = item.split('|');
-                if (parts.length < 3) return;
-
-                const latLng = parts[0].split(',');
-                const lat = parseFloat(latLng[0]);
-                const lng = parseFloat(latLng[1]);
-                const name = parts[1];
-                const reason = parts[2];
-
-                new google.maps.Marker({
-                    position: { lat: lat, lng: lng },
-                    map: this.map,
-                    icon: {
-                        url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
-                        scaledSize: new google.maps.Size(32, 32)
-                    },
-                    title: `OMINIĘTO: ${name} (Powód: ${reason})`
-                });
-            });
-        } catch (e) {
-            console.error('Błąd ładowania wykluczonych punktów:', e);
+    handlePositionError(error) {
+        let message = 'Błąd GPS: ';
+        switch(error.code) {
+            case error.PERMISSION_DENIED:
+                message += 'Dostęp do geolokalizacji został odrzucony.';
+                break;
+            case error.POSITION_UNAVAILABLE:
+                message += 'Informacje o lokalizacji są niedostępne.';
+                break;
+            case error.TIMEOUT:
+                message += 'Żądanie lokalizacji przekroczyło limit czasu.';
+                break;
+            default:
+                message += 'Wystąpił nieznany błąd.';
+                break;
         }
+        this.updateStatus(message, 'offline');
+        this.showError(message);
     }
 
     centerMapOnPosition() {
         if (this.currentPosition && this.map) {
             this.map.setCenter(this.currentPosition);
+            this.map.setZoom(16);
         } else {
-            this.showError('Brak aktualnej pozycji GPS.');
+            this.showError('Brak danych o aktualnej pozycji.');
         }
     }
 
-    setupEventListeners() {
-        document.getElementById('start-btn').addEventListener('click', () => this.startTracking());
-        document.getElementById('stop-btn').addEventListener('click', () => this.stopTracking());
-        document.getElementById('center-btn').addEventListener('click', () => this.centerMapOnPosition());
+    startPeriodicUpdates() {
+        // Update UI every 5 seconds
+        this.updateInterval = setInterval(() => {
+            if (this.isTracking && this.currentPosition) {
+                // Additional periodic checks can go here
+                this.updateConnectionStatus();
+            }
+        }, 5000);
     }
 
-    setupAutoLogout() {}
+    updateConnectionStatus() {
+        // Check if we're still receiving GPS updates
+        const now = Date.now();
+        if (this.lastUpdateTime && (now - this.lastUpdateTime) > 30000) {
+            this.updateStatus('GPS - Brak sygnału', 'offline');
+        }
+    }
 
+    // UI Helper methods
+    updateStatus(message, status) {
+        const statusElement = document.getElementById('connection-status');
+        if (statusElement) {
+            statusElement.textContent = message;
+            statusElement.className = `status-${status}`;
+        }
+    }
+
+    updateElement(id, text) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = text;
+        }
+    }
+
+    updateBatteryDisplay(level) {
+        this.updateElement('battery', `Bateria: ${level}%`);
+    }
+
+    updateButtonStates() {
+        const startBtn = document.getElementById('start-tracking');
+        const stopBtn = document.getElementById('stop-tracking');
+
+        if (startBtn) startBtn.disabled = this.isTracking;
+        if (stopBtn) stopBtn.disabled = !this.isTracking;
+    }
+
+    setupAutoLogout() {
+        window.addEventListener('beforeunload', () => {
+            if (this.isTracking) {
+                navigator.sendBeacon('/api/tracking/logout');
+            }
+        });
+
+        // Visibility API to handle tab switching
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && this.isTracking) {
+                // Tab is hidden, continue tracking in background
+                console.log('Tab hidden, continuing GPS tracking');
+            }
+        });
+    }
+
+    // Notification methods
     showSuccess(message) {
-        const instruction = document.getElementById('instruction-text');
-        if (instruction) instruction.textContent = '✅ ' + message;
-        console.log('SUCCESS:', message);
+        this.showNotification(message, 'success');
     }
 
     showError(message) {
-        const instruction = document.getElementById('instruction-text');
-        if (instruction) instruction.textContent = '❌ ' + message;
-        console.error('ERROR:', message);
+        this.showNotification(message, 'error');
+    }
+
+    showNotification(message, type = 'info') {
+        // Create notification
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show position-fixed`;
+        notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        notification.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+
+        document.body.appendChild(notification);
+
+        // Auto remove
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 5000);
     }
 
     destroy() {
         if (this.isTracking) {
             this.stopTracking();
         }
-        if (this.stompClient) {
-            this.stompClient.disconnect();
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
         }
     }
 }
+
+// Global functions for backward compatibility
+function initNavigation(routeId, routeData) {
+    window.navigationSystem = new NavigationSystem(routeId, routeData);
+}
+
+function startTracking() {
+    if (window.navigationSystem) {
+        window.navigationSystem.startTracking();
+    }
+}
+
+function stopTracking() {
+    if (window.navigationSystem) {
+        window.navigationSystem.stopTracking();
+    }
+}
+
+function centerMapOnPosition() {
+    if (window.navigationSystem) {
+        window.navigationSystem.centerMapOnPosition();
+    }
+}
+
+// Initialize on window load
+window.addEventListener('load', () => {
+    // Get route data from global variables set by Thymeleaf
+    const routeId = window.routeId;
+    if (routeId) {
+        initNavigation(routeId, window.routeData || {});
+    }
+});
+
+// Cleanup on unload
+window.addEventListener('beforeunload', () => {
+    if (window.navigationSystem) {
+        window.navigationSystem.destroy();
+    }
+});

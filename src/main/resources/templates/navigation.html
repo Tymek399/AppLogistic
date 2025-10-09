@@ -162,117 +162,22 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
 
-        .modal-content h3 {
-            color: #1a73e8;
-            margin-bottom: 20px;
-            border-bottom: 3px solid #1a73e8;
-            padding-bottom: 10px;
-        }
-
-        .modal-content h4 {
-            color: #0d6efd;
-            margin-top: 20px;
-            border-bottom: 2px solid #0d6efd;
-            padding-bottom: 10px;
-        }
-
-        .param-item {
-            padding: 8px 0;
-            border-bottom: 1px solid #f0f0f0;
-        }
-
-        .check-item {
-            padding: 10px;
-            margin: 5px 0;
-            border-left: 4px solid #34a853;
-            background: #f1f8f4;
-            border-radius: 4px;
-        }
-
-        .check-item.warning {
-            border-left-color: #fbbc04;
-            background: #fef7e0;
-        }
-
-        .check-item.blocked {
-            border-left-color: #ea4335;
-            background: #fce8e6;
-        }
-
-        .justification-line {
-            margin: 3px 0;
-            line-height: 1.8;
-        }
-
-        .justification-line.header {
-            font-weight: bold;
-            color: #0d6efd;
-            font-size: 1.1em;
-            border-bottom: 2px solid #0d6efd;
-            padding: 5px 0;
-            margin-top: 12px;
-        }
-
-        .justification-line.bridge-ok {
-            color: #28a745;
-            font-weight: bold;
+        .badge-validated {
             background: #d4edda;
-            padding: 6px;
+            color: #155724;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .route-source-info {
+            background: #e7f3ff;
+            border-left: 4px solid #0d6efd;
+            padding: 10px;
+            margin: 15px 0;
             border-radius: 4px;
-            margin: 4px 0;
-        }
-
-        .justification-line.bridge-blocked {
-            color: #dc3545;
-            font-weight: bold;
-            background: #f8d7da;
-            padding: 6px;
-            border-radius: 4px;
-            margin: 4px 0;
-        }
-
-        .justification-line.bridge-warning {
-            color: #856404;
-            font-weight: bold;
-            background: #fff3cd;
-            padding: 6px;
-            border-radius: 4px;
-            margin: 4px 0;
-        }
-
-        .justification-line.info {
-            font-weight: bold;
-            margin-top: 8px;
-            color: #495057;
-        }
-
-        .justification-line.indent {
-            margin-left: 20px;
-            font-size: 0.95em;
-            color: #6c757d;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
-
-        .arriving-banner {
-            position: fixed;
-            top: 120px;
-            left: 0;
-            right: 0;
-            background: #34a853;
-            color: white;
-            padding: 15px;
-            text-align: center;
-            font-weight: bold;
-            z-index: 999;
-            animation: pulse 1.5s infinite;
-        }
-
-        .warning-banner {
-            background: #ea4335;
         }
     </style>
 </head>
@@ -282,14 +187,12 @@
     <div class="modal-content">
         <h3>Walidacja trasy</h3>
         <div id="validation-details"></div>
-
+        <div id="route-source-info" class="route-source-info" style="display:none;"></div>
         <button class="btn btn-success btn-lg mt-3 w-100" onclick="closeModalAndStart()">
             Rozpocznij nawigację
         </button>
     </div>
 </div>
-
-<div id="notification-banner" style="display: none;"></div>
 
 <div class="nav-header">
     <div class="main-instruction">
@@ -354,6 +257,7 @@
     let routeSteps = [];
     let currentStepIndex = 0;
     let updateInterval = null;
+    let savedRoutePolyline = null;
 
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
@@ -379,8 +283,12 @@
 
     async function loadValidation() {
         try {
-            const response = await fetch(`/api/routes/${window.routeId}/validation-details`);
+            const response = await fetch(`/api/routes/${window.routeId}/navigation-data`);
             const data = await response.json();
+
+            // ✅ ZAPISZ DANE TRASY GLOBALNIE
+            window.savedRoute = data;
+
             showValidationModal(data);
         } catch (error) {
             console.error('Error loading validation:', error);
@@ -391,10 +299,28 @@
     function showValidationModal(data) {
         const modal = document.getElementById('validation-modal');
         const details = document.getElementById('validation-details');
-        const justificationSection = document.getElementById('route-justification-section');
-        const justificationContent = document.getElementById('route-justification-content');
+        const sourceInfo = document.getElementById('route-source-info');
 
         let html = '';
+
+        // ✅ INFORMACJA O ŹRÓDLE TRASY
+        if (data.validation) {
+            const source = data.validation.routeJustification?.[0] || 'Nieznane';
+            let sourceText = '';
+            let badgeClass = 'badge-validated';
+
+            if (source.includes('HERE Maps')) {
+                sourceText = '✅ Trasa zwalidowana przez HERE Maps API';
+                badgeClass = 'badge-validated';
+            } else if (source.includes('Google Maps')) {
+                sourceText = '🗺️ Trasa z Google Maps';
+            } else {
+                sourceText = '📍 Trasa standardowa';
+            }
+
+            sourceInfo.innerHTML = `<strong>${sourceText}</strong>`;
+            sourceInfo.style.display = 'block';
+        }
 
         if (data.transportSetInfo) {
             const info = data.transportSetInfo;
@@ -405,75 +331,24 @@
             if (info.trailerHeight_cm) {
                 html += ` (naczepa ${(info.trailerHeight_cm/100).toFixed(2)}m + ładunek ${(info.cargoHeight_cm/100).toFixed(2)}m)`;
             }
-            html += `</div>`;
-            html += `<div class="param-item"><strong>Długość:</strong> ${(info.totalLength_cm/100).toFixed(2)} m</div>`;
-            html += '</div>';
+            html += `</div></div>`;
         }
 
-        if (data.violations && data.violations.length > 0) {
-            html += '<div class="alert alert-danger"><h5>Naruszenia (użyto trasy alternatywnej):</h5><ul>';
-            data.violations.forEach(v => html += `<li>${v}</li>`);
+        if (data.validation?.warnings && data.validation.warnings.length > 0) {
+            html += '<div class="alert alert-warning"><h5>Ostrzeżenia:</h5><ul>';
+            data.validation.warnings.forEach(w => html += `<li>${w}</li>`);
             html += '</ul></div>';
         }
 
-        if (data.restrictions && data.restrictions.length > 0) {
-            html += '<div class="alert alert-warning"><h5>Sprawdzone ograniczenia:</h5>';
-            data.restrictions.forEach(r => {
-                html += `<div class="check-item">${r}</div>`;
-            });
-            html += '</div>';
-        }
-
-        if (!data.hasViolations && !data.hasRestrictions) {
+        if (!data.validation?.hasViolations) {
             html += '<div class="alert alert-success">';
-            html += '<h5>Trasa wolna od ograniczeń!</h5>';
-            html += '<p>Wszystkie mosty i tunele sprawdzone - przejazd możliwy.</p>';
+            html += '<h5>✅ Trasa bezpieczna!</h5>';
+            html += '<p>Wszystkie parametry sprawdzone.</p>';
             html += '</div>';
         }
 
         details.innerHTML = html;
-
-        if (data.routeJustification && data.routeJustification.length > 0) {
-            justificationSection.style.display = 'block';
-
-            let justHtml = '';
-            data.routeJustification.forEach(line => {
-                let className = 'justification-line';
-
-                if (line.includes('═══')) {
-                    className += ' header';
-                }
-                else if (line.includes('MOŻNA PRZEJECHAĆ') || line.includes('udźwignie') || line.includes('ZATWIERDZONA') || line.includes('✓')) {
-                    className += ' bridge-ok';
-                }
-                else if (line.includes('OMIJAMY') || line.includes('ZA CIĘŻKI') || line.includes('ZA WYSOKI') || line.includes('NARUSZENIE') || line.includes('❌')) {
-                    className += ' bridge-blocked';
-                }
-                else if (line.includes('⚠') || line.includes('UWAGA') || line.includes('OGRANICZENIE')) {
-                    className += ' bridge-warning';
-                }
-                else if (line.includes('Most:') || line.includes('Tunel:') || line.includes('Droga:')) {
-                    className += ' info';
-                }
-                else if (line.startsWith('   ')) {
-                    className += ' indent';
-                }
-
-                justHtml += `<div class="${className}">${escapeHtml(line)}</div>`;
-            });
-
-            justificationContent.innerHTML = justHtml;
-        } else {
-            justificationSection.style.display = 'none';
-        }
-
         modal.style.display = 'flex';
-    }
-
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 
     function closeModalAndStart() {
@@ -502,14 +377,7 @@
             zoomControl: true,
             zoomControlOptions: {
                 position: google.maps.ControlPosition.RIGHT_BOTTOM
-            },
-            styles: [
-                {
-                    featureType: "poi",
-                    elementType: "labels",
-                    stylers: [{ visibility: "off" }]
-                }
-            ]
+            }
         });
 
         directionsService = new google.maps.DirectionsService();
@@ -523,7 +391,229 @@
         });
         directionsRenderer.setMap(map);
 
-        calculateRoute();
+        // ✅ PRIORYTET: Załaduj zapisaną trasę
+        loadSavedRoute();
+    }
+
+    /**
+     * ✅ POPRAWIONE ŁADOWANIE ZAPISANEJ TRASY
+     */
+    async function loadSavedRoute() {
+        try {
+            const response = await fetch(`/api/routes/${window.routeId}/navigation-data`);
+            const data = await response.json();
+
+            console.log('📦 Dane trasy:', data);
+
+            // ✅ PRIORYTET 1: HERE Maps zwalidowana trasa
+            if (data.herePolyline) {
+                console.log('🟢 Używam zwalidowanej trasy HERE Maps');
+                try {
+                    const coordinates = decodeHereFlexiblePolyline(data.herePolyline);
+                    displaySavedRoute(coordinates, '#34a853', 'HERE Maps (Zwalidowana)');
+                    return;
+                } catch (error) {
+                    console.error('❌ Błąd dekodowania HERE polyline:', error);
+                }
+            }
+
+            // ✅ PRIORYTET 2: Google Maps zapisana trasa
+            if (data.googleMapsRoutes && data.googleMapsRoutes.length > 0) {
+                console.log('🔵 Używam zapisanej trasy Google Maps');
+                const route = data.googleMapsRoutes[0];
+                if (route.overview_polyline?.points) {
+                    const coordinates = decodeGooglePolyline(route.overview_polyline.points);
+                    displaySavedRoute(coordinates, '#4285F4', 'Google Maps (Zapisana)');
+                    return;
+                }
+            }
+
+            // ✅ FALLBACK: Przelicz trasę na nowo
+            console.log('⚠️ Brak zapisanej trasy - przeliczam na nowo');
+            calculateRoute();
+
+        } catch (error) {
+            console.error('❌ Błąd ładowania trasy:', error);
+            calculateRoute();
+        }
+    }
+
+    /**
+     * ✅ POPRAWIONE DEKODOWANIE HERE FLEXIBLE POLYLINE
+     * POPRAWKA: Używa charAt() zamiast charCodeAt()
+     */
+    function decodeHereFlexiblePolyline(encoded) {
+        const ENCODING_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+        let index = 0;
+        let lat = 0;
+        let lng = 0;
+        const coordinates = [];
+
+        // ✅ POPRAWKA: charAt zamiast charCodeAt
+        const precisionChar = encoded.charAt(0);
+        const precision = Math.pow(10, decodeChar(precisionChar));
+        index++;
+
+        while (index < encoded.length) {
+            // Decode latitude
+            let shift = 0;
+            let result = 0;
+            let byte;
+
+            do {
+                // ✅ POPRAWKA: charAt zamiast charCodeAt
+                byte = decodeChar(encoded.charAt(index++));
+                result |= (byte & 0x1F) << shift;
+                shift += 5;
+            } while (byte >= 0x20);
+
+            const latChange = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lat += latChange;
+
+            // Decode longitude
+            shift = 0;
+            result = 0;
+
+            do {
+                // ✅ POPRAWKA: charAt zamiast charCodeAt
+                byte = decodeChar(encoded.charAt(index++));
+                result |= (byte & 0x1F) << shift;
+                shift += 5;
+            } while (byte >= 0x20);
+
+            const lngChange = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lng += lngChange;
+
+            coordinates.push({ lat: lat / precision, lng: lng / precision });
+        }
+
+        return coordinates;
+
+        function decodeChar(char) {
+            const pos = ENCODING_TABLE.indexOf(char);
+            if (pos === -1) throw new Error(`Invalid character: ${char}`);
+            return pos;
+        }
+    }
+
+    /**
+     * ✅ DEKODOWANIE GOOGLE POLYLINE
+     */
+    function decodeGooglePolyline(encoded) {
+        const coordinates = [];
+        let index = 0;
+        let lat = 0;
+        let lng = 0;
+
+        while (index < encoded.length) {
+            let b, shift = 0, result = 0;
+
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+
+            const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+
+            const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lng += dlng;
+
+            coordinates.push({ lat: lat / 1e5, lng: lng / 1e5 });
+        }
+
+        return coordinates;
+    }
+
+    /**
+     * ✅ WYŚWIETLENIE ZAPISANEJ TRASY
+     */
+    function displaySavedRoute(coordinates, color, label) {
+        savedRoutePolyline = new google.maps.Polyline({
+            path: coordinates,
+            geodesic: true,
+            strokeColor: color,
+            strokeOpacity: 1.0,
+            strokeWeight: 5,
+            map: map
+        });
+
+        // Markery
+        new google.maps.Marker({
+            position: coordinates[0],
+            map: map,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 10,
+                fillColor: '#34a853',
+                fillOpacity: 1,
+                strokeColor: 'white',
+                strokeWeight: 3
+            },
+            title: 'Start'
+        });
+
+        new google.maps.Marker({
+            position: coordinates[coordinates.length - 1],
+            map: map,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 10,
+                fillColor: '#ea4335',
+                fillOpacity: 1,
+                strokeColor: 'white',
+                strokeWeight: 3
+            },
+            title: 'Cel'
+        });
+
+        // Dopasuj mapę
+        const bounds = new google.maps.LatLngBounds();
+        coordinates.forEach(coord => bounds.extend(coord));
+        map.fitBounds(bounds);
+
+        console.log(`✅ Załadowano trasę: ${label}`);
+
+        // Symuluj route steps dla nawigacji
+        generateStepsFromPolyline(coordinates);
+        startNavigation();
+    }
+
+    function generateStepsFromPolyline(coordinates) {
+        routeSteps = [];
+        const stepSize = Math.max(10, Math.floor(coordinates.length / 20));
+
+        for (let i = 0; i < coordinates.length - 1; i += stepSize) {
+            const start = coordinates[i];
+            const end = coordinates[Math.min(i + stepSize, coordinates.length - 1)];
+            const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                new google.maps.LatLng(start.lat, start.lng),
+                new google.maps.LatLng(end.lat, end.lng)
+            );
+
+            routeSteps.push({
+                instruction: i === 0 ? 'Kontynuuj trasę' : 'Jedź dalej',
+                distance: distance,
+                distanceText: `${(distance / 1000).toFixed(1)} km`,
+                duration: `${Math.round(distance / 1000 * 2)} min`,
+                maneuver: 'straight',
+                startLoc: start,
+                endLoc: end
+            });
+        }
+
+        updateInstructions();
     }
 
     function calculateRoute() {
@@ -609,7 +699,6 @@
             document.getElementById('instruction-distance').textContent = '';
             document.getElementById('next-instruction').style.display = 'none';
             document.getElementById('complete-btn').style.display = 'block';
-            showBanner('Dotarłeś do celu!', 'arriving-banner');
             return;
         }
 
@@ -673,8 +762,7 @@
         const pos = {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
-            speedKmh: position.coords.speed ? position.coords.speed * 3.6 :
-                0,
+            speedKmh: position.coords.speed ? position.coords.speed * 3.6 : 0,
             accuracy: position.coords.accuracy,
             timestamp: new Date().toISOString()
         };
@@ -709,8 +797,6 @@
                 now.setMinutes(now.getMinutes() + etaMin);
                 document.getElementById('eta-value').textContent =
                     now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-            } else {
-                document.getElementById('eta-value').textContent = '--:--';
             }
         }
     }
@@ -739,9 +825,11 @@
         if (routeSteps.length === 0 || currentStepIndex >= routeSteps.length) return;
 
         const step = routeSteps[currentStepIndex];
+        const endLoc = step.endLoc;
+
         const distToEnd = calculateDistance(
             pos.latitude, pos.longitude,
-            step.endLoc.lat(), step.endLoc.lng()
+            endLoc.lat, endLoc.lng
         );
 
         if (distToEnd < 0.025) {
@@ -754,7 +842,6 @@
         console.error('GPS error:', error);
         document.getElementById('gps-status').textContent = 'Błąd';
         document.getElementById('gps-status').style.color = '#ea4335';
-        showError('Błąd GPS: ' + error.message);
     }
 
     function startAutoUpdate() {
@@ -774,11 +861,17 @@
     }
 
     function recalculateRoute() {
-        if (currentPosition) {
-            window.startLat = currentPosition.lat;
-            window.startLng = currentPosition.lng;
-            calculateRoute();
-            showSuccess('Trasa przeliczona');
+        if (confirm('⚠️ Przeliczenie spowoduje utratę zwalidowanej trasy. Kontynuować?')) {
+            if (currentPosition) {
+                window.startLat = currentPosition.lat;
+                window.startLng = currentPosition.lng;
+
+                // Usuń zapisaną trasę
+                if (savedRoutePolyline) savedRoutePolyline.setMap(null);
+
+                calculateRoute();
+                showSuccess('Trasa przeliczona');
+            }
         }
     }
 
@@ -806,21 +899,14 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    function showBanner(msg, className) {
-        const banner = document.createElement('div');
-        banner.className = 'arriving-banner ' + className;
-        banner.textContent = msg;
-        banner.style.display = 'block';
-        document.body.appendChild(banner);
-        setTimeout(() => banner.remove(), 5000);
-    }
-
     function showError(msg) {
-        showBanner('❌ ' + msg, 'warning-banner');
+        console.error(msg);
+        alert('❌ ' + msg);
     }
 
     function showSuccess(msg) {
-        showBanner('✅ ' + msg, 'arriving-banner');
+        console.log(msg);
+        alert('✅ ' + msg);
     }
 
     window.addEventListener('beforeunload', () => {

@@ -33,7 +33,7 @@ public class ApiKeysConfig {
         private boolean enabled = true;
         private String baseUrl = "https://api.tomtom.com/routing/1";
     }
-
+    
     public boolean isGoogleMapsEnabled() {
         return googleMaps.enabled && isValidKey(googleMaps.key);
     }

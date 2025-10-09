@@ -2,7 +2,8 @@ package com.military.applogistic.controller;
 
 import com.military.applogistic.dto.request.CreateUserRequest;
 import com.military.applogistic.dto.response.UserResponse;
-import com.military.applogistic.repository.user.UserRepository;
+import com.military.applogistic.entity.User;
+import com.military.applogistic.repository.UserRepository;
 import com.military.applogistic.service.UserService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
@@ -50,4 +51,7 @@ public class AdminController {
         userService.deleteUser(username);
         return ResponseEntity.ok().build();
     }
+
+
+
 }

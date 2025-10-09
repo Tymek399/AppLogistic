@@ -6,9 +6,6 @@ import lombok.Data;
 @Entity
 @Table(name = "transport_sets")
 @Data
-
-//todo CO TO KURWA JEST
-//TODO ENCJA MA MIEC TYLKO POLA DO BAZY DANYCH JA JEBIE
 public class TransportSet {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
