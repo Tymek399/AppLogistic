@@ -64,6 +64,7 @@
         .badge-clear { background: #d4edda; color: #155724; }
         .badge-warning { background: #fff3cd; color: #856404; }
         .badge-danger { background: #f8d7da; color: #721c24; }
+        .badge-permit { background: #cfe2ff; color: #084298; } /* ✅ NOWY */
 
         .infrastructure-details {
             background: #f8f9fa;
@@ -71,6 +72,46 @@
             padding: 15px;
             margin: 15px 0;
             border-radius: 4px;
+        }
+
+        /* ✅ NOWY STYL - lista pozwoleń */
+        .permits-section {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 15px;
+        }
+
+        .permit-item {
+            background: white;
+            border-left: 4px solid #ff9800;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .permit-location {
+            font-weight: bold;
+            color: #d63384;
+            font-size: 1.05em;
+        }
+
+        .permit-city {
+            color: #0d6efd;
+            font-weight: 600;
+        }
+
+        .permit-road {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+
+        .permit-description {
+            color: #495057;
+            margin-top: 5px;
+            font-size: 0.95em;
         }
 
         .btn-action {
@@ -97,7 +138,6 @@
         .driver-online { color: #28a745; font-weight: bold; }
         .driver-offline { color: #6c757d; }
 
-        /* NOWE STYLE DLA WYBORU TYPU TRANSPORTU */
         .transport-mode-selector {
             background: #f8f9fa;
             border: 2px solid #dee2e6;
@@ -128,6 +168,52 @@
         .transport-mode-icon {
             font-size: 2em;
             margin-right: 10px;
+        }
+
+        /* ✅ Styl dla mapy w modalu */
+        .route-map-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .route-map-container {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 1200px;
+            height: 85vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        .route-map-header {
+            padding: 20px;
+            border-bottom: 2px solid #dee2e6;
+            background: #f8f9fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .route-map-body {
+            flex: 1;
+            position: relative;
+        }
+
+        #route-preview-map {
+            width: 100%;
+            height: 100%;
         }
     </style>
 </head>
@@ -267,7 +353,6 @@
                                 </select>
                             </div>
 
-                            <!-- ✅ NOWA SEKCJA - WYBÓR TYPU TRANSPORTU -->
                             <div class="transport-mode-selector" id="transport-mode-container" style="display:none;">
                                 <label class="form-label"><strong>Typ transportu:</strong></label>
 
@@ -393,15 +478,28 @@
     </div>
 </div>
 
+<!-- ✅ MODAL DO WYŚWIETLANIA MAPY TRASY -->
+<div id="route-map-modal" class="route-map-modal">
+    <div class="route-map-container">
+        <div class="route-map-header">
+            <h4 id="route-map-title">Trasa na mapie</h4>
+            <button class="btn btn-secondary" onclick="closeRouteMapModal()">Zamknij</button>
+        </div>
+        <div class="route-map-body">
+            <div id="route-preview-map"></div>
+        </div>
+    </div>
+</div>
+
 <script src="/js/operator.js"></script>
 <script>
     let operatorDashboard;
     let googleMapsLoaded = false;
     const token = localStorage.getItem('token');
 
-    // ✅ ZMIENNE GLOBALNE DLA WYBORU TYPU TRANSPORTU
     let allCargo = [];
     let selectedTransportMode = 'trailer';
+    let routePreviewMap = null; // ✅ Mapa dla modalu
 
     if (!token) window.location.href = '/login.html';
 
@@ -415,7 +513,6 @@
         return originalFetch.apply(this, args);
     };
 
-    // ✅ NOWE FUNKCJE DLA WYBORU TYPU TRANSPORTU
     function checkCargoCapabilities() {
         const cargoId = document.getElementById('cargo-select').value;
         const container = document.getElementById('transport-mode-container');
@@ -431,10 +528,8 @@
             return;
         }
 
-        // Pokaż opcje tylko jeśli pojazd MOŻE jechać sam
         if (cargo.canDriveAlone && cargo.totalWeightKg <= 5000) {
             container.style.display = 'block';
-            // Domyślnie wybierz lawetę
             selectTransportMode('trailer');
         } else {
             container.style.display = 'none';
@@ -446,7 +541,6 @@
         selectedTransportMode = mode;
         document.getElementById('transport-mode').value = mode;
 
-        // Wizualna aktualizacja
         document.querySelectorAll('.transport-mode-option').forEach(el => {
             el.classList.remove('selected');
         });
@@ -569,6 +663,10 @@
             if (validation.hasViolations) {
                 html += '<span class="validation-badge badge-danger">🔄 Użyto trasy alternatywnej</span>';
             }
+            // ✅ NOWY BADGE - pozwolenia
+            if (validation.permits && validation.permits.length > 0) {
+                html += `<span class="validation-badge badge-permit">📋 Wymaga ${validation.permits.length} pozwoleń</span>`;
+            }
             html += '</div>';
         }
 
@@ -577,6 +675,9 @@
                     <div class="route-actions">
                         <button class="btn btn-info btn-action" onclick="showFullValidation(${route.id})" title="Szczegółowa walidacja mostów i tuneli">
                             Szczegóły Walidacji
+                        </button>
+                        <button class="btn btn-success btn-action" onclick="showRouteOnMap(${route.id})" title="Wyświetl trasę na mapie">
+                            🗺️ Pokaż na mapie
                         </button>
         `;
 
@@ -628,6 +729,33 @@
             `;
         }
 
+        // ✅ NOWA SEKCJA - WYŚWIETLANIE POZWOLEŃ
+        if (validation && validation.permits && validation.permits.length > 0) {
+            html += `
+                <div class="permits-section">
+                    <h6><strong>⚠️ WYMAGANE POZWOLENIA NA PRZEJAZD (${validation.permits.length}):</strong></h6>
+                    <p style="margin: 10px 0; font-size: 0.9em;">
+                        Przed rozpoczęciem transportu należy uzyskać pozwolenia dla następujących obiektów:
+                    </p>
+            `;
+
+            validation.permits.forEach((permit, index) => {
+                // Format: "Nazwa obiektu (Miasto) - droga: Droga: opis"
+                const permitHtml = parsePermitString(permit, index + 1);
+                html += permitHtml;
+            });
+
+            html += `
+                    <div class="alert alert-warning mt-3 mb-0">
+                        <small>
+                            <strong>ℹ️ Informacja:</strong> Skontaktuj się z zarządami dróg w odpowiednich miastach
+                            w celu uzyskania pozwoleń na przejazd pojazdu nienormatywnego.
+                        </small>
+                    </div>
+                </div>
+            `;
+        }
+
         if (validation && validation.routeJustification && validation.routeJustification.length > 0) {
             html += `
                 <div class="mt-3">
@@ -662,6 +790,64 @@
         html += `
             </div>
         `;
+
+        return html;
+    }
+
+    /**
+     * ✅ NOWA FUNKCJA - parsowanie stringa pozwolenia
+     */
+    function parsePermitString(permitString, index) {
+        // Format: "Nazwa (Miasto) - droga: X: Opis"
+        let html = `<div class="permit-item">`;
+        html += `<div style="display:flex; align-items:center; margin-bottom:8px;">`;
+        html += `<span style="background:#ff9800;color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;margin-right:12px;">${index}</span>`;
+
+        // Wyciągnij nazwę, miasto, drogę
+        let location = '';
+        let city = '';
+        let road = '';
+        let description = permitString;
+
+        // Szukaj "(Miasto)"
+        const cityMatch = permitString.match(/\(([^)]+)\)/);
+        if (cityMatch) {
+            city = cityMatch[1];
+            const parts = permitString.split('(');
+            location = parts[0].trim();
+            description = permitString.substring(permitString.indexOf(')') + 1).trim();
+        }
+
+        // Szukaj "- droga: X:"
+        const roadMatch = description.match(/- droga: ([^:]+):/);
+        if (roadMatch) {
+            road = roadMatch[1].trim();
+            description = description.substring(description.lastIndexOf(':') + 1).trim();
+        } else if (description.includes(':')) {
+            // Fallback - pierwsze : to koniec nazwy
+            const colonIndex = description.indexOf(':');
+            if (!location) {
+                location = description.substring(0, colonIndex).trim();
+            }
+            description = description.substring(colonIndex + 1).trim();
+        }
+
+        html += `<div style="flex:1;">`;
+
+        if (location) {
+            html += `<div class="permit-location">${escapeHtml(location)}</div>`;
+        }
+
+        if (city) {
+            html += `<div class="permit-city">📍 ${escapeHtml(city)}</div>`;
+        }
+
+        if (road) {
+            html += `<div class="permit-road">🛣️ Droga: ${escapeHtml(road)}</div>`;
+        }
+
+        html += `<div class="permit-description">${escapeHtml(description)}</div>`;
+        html += `</div></div></div>`;
 
         return html;
     }
@@ -705,6 +891,21 @@
             html += `<li><strong>Długość:</strong> ${(info.totalLength_cm/100).toFixed(2)}m</li>`;
             html += `<li><strong>Szerokość:</strong> ${(info.totalWidth_cm/100).toFixed(2)}m</li>`;
             html += '</ul></div>';
+        }
+
+        // ✅ POZWOLENIA W PEŁNEJ WALIDACJI
+        if (validation.permits && validation.permits.length > 0) {
+            html += '<div style="background:#fff3cd;padding:20px;border-radius:8px;margin-top:20px;border:2px solid #ffc107;">';
+            html += `<h5 style="color:#856404;"><strong>⚠️ WYMAGANE POZWOLENIA (${validation.permits.length}):</strong></h5>`;
+            html += '<ul style="margin:10px 0;line-height:2;">';
+            validation.permits.forEach(permit => {
+                html += `<li style="margin-bottom:10px;">${escapeHtml(permit)}</li>`;
+            });
+            html += '</ul>';
+            html += '<div style="background:#fff;padding:10px;border-radius:4px;margin-top:15px;">';
+            html += '<small><strong>📞 Kontakt:</strong> Skontaktuj się z zarządami dróg w odpowiednich miastach przed rozpoczęciem transportu.</small>';
+            html += '</div>';
+            html += '</div>';
         }
 
         if (validation.routeJustification && validation.routeJustification.length > 0) {
@@ -782,6 +983,200 @@
         document.body.appendChild(modal);
     }
 
+    /**
+     * ✅ NOWA FUNKCJA - Wyświetl trasę na mapie
+     */
+    async function showRouteOnMap(routeId) {
+        try {
+            const response = await fetch(`/api/routes/${routeId}/navigation-data`);
+            const data = await response.json();
+
+            const modal = document.getElementById('route-map-modal');
+            document.getElementById('route-map-title').textContent = `Trasa #${routeId} - ${data.startAddress} → ${data.endAddress}`;
+
+            modal.style.display = 'flex';
+
+            // Inicjalizuj mapę jeśli jeszcze nie istnieje
+            if (!routePreviewMap) {
+                routePreviewMap = new google.maps.Map(document.getElementById('route-preview-map'), {
+                    zoom: 10,
+                    center: { lat: data.startLat, lng: data.startLng }
+                });
+            }
+
+            // Wyczyść poprzednie markery/polyline
+            routePreviewMap = new google.maps.Map(document.getElementById('route-preview-map'), {
+                zoom: 10,
+                center: { lat: data.startLat, lng: data.startLng }
+            });
+
+            // Marker startowy
+            new google.maps.Marker({
+                position: { lat: data.startLat, lng: data.startLng },
+                map: routePreviewMap,
+                title: 'Start',
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 10,
+                    fillColor: '#34a853',
+                    fillOpacity: 1,
+                    strokeColor: 'white',
+                    strokeWeight: 3
+                }
+            });
+
+            // Marker końcowy
+            new google.maps.Marker({
+                position: { lat: data.endLat, lng: data.endLng },
+                map: routePreviewMap,
+                title: 'Koniec',
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 10,
+                    fillColor: '#ea4335',
+                    fillOpacity: 1,
+                    strokeColor: 'white',
+                    strokeWeight: 3
+                }
+            });
+
+            // Rysuj trasę
+            let coordinates = [];
+            let routeColor = '#4285F4';
+            let routeLabel = 'Google Maps';
+
+            if (data.herePolyline) {
+                // HERE Maps polyline
+                coordinates = decodeHereFlexiblePolyline(data.herePolyline);
+                routeColor = '#34a853';
+                routeLabel = 'HERE Maps (Zwalidowana)';
+            } else if (data.googleMapsRoutes && data.googleMapsRoutes.length > 0) {
+                // Google Maps polyline
+                const route = data.googleMapsRoutes[0];
+                if (route.overview_polyline?.points) {
+                    coordinates = decodeGooglePolyline(route.overview_polyline.points);
+                }
+            }
+
+            if (coordinates.length > 0) {
+                new google.maps.Polyline({
+                    path: coordinates,
+                    geodesic: true,
+                    strokeColor: routeColor,
+                    strokeOpacity: 1.0,
+                    strokeWeight: 5,
+                    map: routePreviewMap
+                });
+
+                // Dopasuj mapę do trasy
+                const bounds = new google.maps.LatLngBounds();
+                coordinates.forEach(coord => bounds.extend(coord));
+                routePreviewMap.fitBounds(bounds);
+
+                console.log(`✅ Wyświetlono trasę: ${routeLabel} (${coordinates.length} punktów)`);
+            }
+
+        } catch (error) {
+            console.error('Błąd wyświetlania trasy:', error);
+            alert('Nie udało się załadować trasy na mapie');
+        }
+    }
+
+    function closeRouteMapModal() {
+        document.getElementById('route-map-modal').style.display = 'none';
+    }
+
+    /**
+     * ✅ Dekodowanie HERE Flexible Polyline
+     */
+    function decodeHereFlexiblePolyline(encoded) {
+        const ENCODING_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+        let index = 0;
+        let lat = 0;
+        let lng = 0;
+        const coordinates = [];
+
+        const precisionChar = encoded.charAt(0);
+        const precision = Math.pow(10, ENCODING_TABLE.indexOf(precisionChar));
+        index++;
+
+        while (index < encoded.length) {
+            let shift = 0;
+            let result = 0;
+            let byte;
+
+            do {
+                byte = ENCODING_TABLE.indexOf(encoded.charAt(index++));
+                if (byte === -1) throw new Error('Invalid character in polyline');
+                result |= (byte & 0x1F) << shift;
+                shift += 5;
+            } while (byte >= 0x20);
+
+            const latChange = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lat += latChange;
+
+            shift = 0;
+            result = 0;
+
+            do {
+                byte = ENCODING_TABLE.indexOf(encoded.charAt(index++));
+                if (byte === -1) throw new Error('Invalid character in polyline');
+                result |= (byte & 0x1F) << shift;
+                shift += 5;
+            } while (byte >= 0x20);
+
+            const lngChange = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lng += lngChange;
+
+            coordinates.push({
+                lat: lat / precision,
+                lng: lng / precision
+            });
+        }
+
+        return coordinates;
+    }
+
+    /**
+     * ✅ Dekodowanie Google Polyline
+     */
+    function decodeGooglePolyline(encoded) {
+        const coordinates = [];
+        let index = 0;
+        let lat = 0;
+        let lng = 0;
+
+        while (index < encoded.length) {
+            let b, shift = 0, result = 0;
+
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+
+            const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+
+            const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lng += dlng;
+
+            coordinates.push({ lat: lat / 1e5, lng: lng / 1e5 });
+        }
+
+        return coordinates;
+    }
+
     function switchTab(tab) {
         document.querySelectorAll('#routes-section, #drivers-section, #vehicles-section, #add-equipment-section').forEach(el => el.style.display = 'none');
         document.querySelectorAll('.btn-primary, .btn-outline-primary').forEach(el => {
@@ -820,7 +1215,6 @@
                 fetch('/api/vehicles/transport-sets').then(r => r.json())
             ]);
 
-            // ✅ Zapisz cargo globalnie
             allCargo = cargo;
 
             document.getElementById('transporter-select').innerHTML = '<option value="">Wybierz...</option>' +
@@ -857,7 +1251,7 @@
                     transporterId: document.getElementById('transporter-select').value,
                     cargoId: document.getElementById('cargo-select').value,
                     description: document.getElementById('set-description').value,
-                    transportMode: selectedTransportMode  // ✅ Dodaj wybrany tryb
+                    transportMode: selectedTransportMode
                 })
             });
 

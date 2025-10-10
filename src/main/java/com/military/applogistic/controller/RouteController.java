@@ -50,24 +50,77 @@ public class RouteController {
                     Map<String, Object> routeData = objectMapper.readValue(
                             savedRoute.getRouteDataJson(), Map.class);
 
+                    // ✅ DANE GOOGLE MAPS DO WYŚWIETLENIA NA MAPIE
                     if (routeData.containsKey("routes")) {
                         detailedResponse.put("googleMapsRoute", routeData.get("routes"));
                     }
 
-                    // ✅ DODAJ ŹRÓDŁO TRASY I POLYLINE
+                    // ✅ POLYLINE DO NAWIGACJI
                     detailedResponse.put("routeSource", routeData.getOrDefault("routeSource", "GOOGLE_MAPS"));
-
                     if (routeData.containsKey("herePolyline")) {
                         detailedResponse.put("herePolyline", routeData.get("herePolyline"));
                     }
 
-                    detailedResponse.put("validation", Map.of(
-                            "hasRestrictions", routeData.getOrDefault("hasRestrictions", false),
-                            "hasWarnings", routeData.getOrDefault("hasWarnings", false),
-                            "hasViolations", routeData.getOrDefault("hasViolations", false),
-                            "warnings", routeData.getOrDefault("warnings", new ArrayList<>()),
-                            "routeJustification", routeData.getOrDefault("routeJustification", new ArrayList<>())
-                    ));
+                    // ✅ PEŁNE INFORMACJE O WALIDACJI
+                    Map<String, Object> validationInfo = new HashMap<>();
+                    validationInfo.put("hasRestrictions", routeData.getOrDefault("hasRestrictions", false));
+                    validationInfo.put("hasWarnings", routeData.getOrDefault("hasWarnings", false));
+                    validationInfo.put("hasViolations", routeData.getOrDefault("hasViolations", false));
+                    validationInfo.put("requiresPermit", routeData.getOrDefault("requiresPermit", false));
+                    validationInfo.put("warnings", routeData.getOrDefault("warnings", new ArrayList<>()));
+                    validationInfo.put("violations", routeData.getOrDefault("violations", new ArrayList<>()));
+
+                    // ✅ KLUCZOWE: LISTA WYMAGANYCH POZWOLEŃ
+                    List<String> permits = (List<String>) routeData.getOrDefault("permits", new ArrayList<>());
+                    validationInfo.put("permits", permits);
+                    validationInfo.put("permitsCount", permits.size());
+
+                    // ✅ SZCZEGÓŁY INFRASTRUKTURY (mosty, tunele)
+                    List<Map<String, Object>> infrastructure =
+                            (List<Map<String, Object>>) routeData.getOrDefault("infrastructureDetails", new ArrayList<>());
+                    validationInfo.put("infrastructureDetails", infrastructure);
+                    validationInfo.put("infrastructureCount", infrastructure.size());
+
+                    // ✅ POLICZ PRZEJEZDNE I ZABLOKOWANE
+                    long passableCount = infrastructure.stream()
+                            .filter(i -> Boolean.TRUE.equals(i.get("canPass")))
+                            .count();
+                    long blockedCount = infrastructure.stream()
+                            .filter(i -> Boolean.FALSE.equals(i.get("canPass")))
+                            .count();
+
+                    validationInfo.put("passableInfrastructure", passableCount);
+                    validationInfo.put("blockedInfrastructure", blockedCount);
+
+                    // ✅ INFORMACJE O PRÓBACH SZUKANIA TRASY
+                    validationInfo.put("searchAttempts", routeData.getOrDefault("searchAttempts", 1));
+                    validationInfo.put("attemptReports", routeData.getOrDefault("attemptReports", new ArrayList<>()));
+
+                    // ✅ CZY TO BYŁ LEKKI POJAZD (POMINIĘTA WALIDACJA)
+                    validationInfo.put("lightVehicle", routeData.getOrDefault("lightVehicle", false));
+                    validationInfo.put("validationSkipped", routeData.getOrDefault("validationSkipped", false));
+
+                    detailedResponse.put("validation", validationInfo);
+
+                    // ✅ METRYKI TRASY
+                    Map<String, Object> metrics = new HashMap<>();
+                    metrics.put("distance", savedRoute.getTotalDistanceKm());
+                    metrics.put("estimatedTime", savedRoute.getEstimatedTimeMinutes());
+                    detailedResponse.put("metrics", metrics);
+
+                    // ✅ INFORMACJE O ZESTAWIE TRANSPORTOWYM
+                    Map<String, Object> transportInfo = new HashMap<>();
+                    transportInfo.put("id", savedRoute.getTransportSet().getId());
+                    transportInfo.put("description", savedRoute.getTransportSet().getDescription());
+                    transportInfo.put("weightKg", savedRoute.getTransportSet().getTotalWeightKg());
+                    transportInfo.put("weightTon", savedRoute.getTransportSet().getTotalWeightKg() / 1000.0);
+                    transportInfo.put("heightCm", savedRoute.getTransportSet().getTotalHeightCm());
+                    transportInfo.put("heightM", savedRoute.getTransportSet().getTotalHeightCm() / 100.0);
+                    transportInfo.put("lengthCm", savedRoute.getTransportSet().getTotalLengthCm());
+                    transportInfo.put("widthCm", savedRoute.getTransportSet().getTotalWidthCm());
+                    transportInfo.put("maxAxleLoadKg", savedRoute.getTransportSet().getMaxAxleLoadKg());
+                    detailedResponse.put("transportSet", transportInfo);
+
                 } catch (Exception e) {
                     log.error("Error parsing route data", e);
                 }
@@ -90,8 +143,86 @@ public class RouteController {
     }
 
     /**
-     * ✅ NOWY ENDPOINT - Pełne dane nawigacyjne dla kierowcy
-     * Zwraca trasę z HERE polyline lub Google Maps routes
+     * ✅ ENDPOINT - Szczegóły trasy z pełnymi informacjami dla operatora
+     */
+    @GetMapping("/{id}/details")
+    @PreAuthorize("hasAnyRole('OPERATOR', 'DRIVER', 'ADMIN')")
+    public ResponseEntity<Map<String, Object>> getRouteDetails(@PathVariable Long id) {
+        try {
+            Route route = routeRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Route not found"));
+
+            Map<String, Object> details = new HashMap<>();
+            details.put("routeId", id);
+            details.put("startAddress", route.getStartAddress());
+            details.put("endAddress", route.getEndAddress());
+            details.put("startLat", route.getStartLatitude());
+            details.put("startLng", route.getStartLongitude());
+            details.put("endLat", route.getEndLatitude());
+            details.put("endLng", route.getEndLongitude());
+            details.put("status", route.getStatus());
+            details.put("createdBy", route.getCreatedByUsername());
+            details.put("createdAt", route.getCreatedAt());
+            details.put("assignedDriver", route.getAssignedDriverUsername());
+
+            // ✅ METRYKI
+            details.put("distance", route.getTotalDistanceKm());
+            details.put("estimatedTime", route.getEstimatedTimeMinutes());
+
+            // ✅ ZESTAW TRANSPORTOWY
+            Map<String, Object> transportInfo = new HashMap<>();
+            transportInfo.put("id", route.getTransportSet().getId());
+            transportInfo.put("description", route.getTransportSet().getDescription());
+            transportInfo.put("weightKg", route.getTransportSet().getTotalWeightKg());
+            transportInfo.put("weightTon", route.getTransportSet().getTotalWeightKg() / 1000.0);
+            transportInfo.put("heightCm", route.getTransportSet().getTotalHeightCm());
+            transportInfo.put("heightM", route.getTransportSet().getTotalHeightCm() / 100.0);
+            transportInfo.put("lengthCm", route.getTransportSet().getTotalLengthCm());
+            transportInfo.put("widthCm", route.getTransportSet().getTotalWidthCm());
+            transportInfo.put("maxAxleLoadKg", route.getTransportSet().getMaxAxleLoadKg());
+            details.put("transportSet", transportInfo);
+
+            if (route.getRouteDataJson() != null && !route.getRouteDataJson().equals("{}")) {
+                Map<String, Object> routeData = objectMapper.readValue(
+                        route.getRouteDataJson(), Map.class);
+
+                // ✅ DANE DO MAPY
+                if (routeData.containsKey("routes")) {
+                    details.put("googleMapsRoute", routeData.get("routes"));
+                }
+
+                details.put("routeSource", routeData.getOrDefault("routeSource", "GOOGLE_MAPS"));
+
+                if (routeData.containsKey("herePolyline")) {
+                    details.put("herePolyline", routeData.get("herePolyline"));
+                }
+
+                // ✅ PEŁNA WALIDACJA
+                Map<String, Object> validation = new HashMap<>();
+                validation.put("hasRestrictions", routeData.getOrDefault("hasRestrictions", false));
+                validation.put("hasWarnings", routeData.getOrDefault("hasWarnings", false));
+                validation.put("requiresPermit", routeData.getOrDefault("requiresPermit", false));
+                validation.put("warnings", routeData.getOrDefault("warnings", new ArrayList<>()));
+                validation.put("violations", routeData.getOrDefault("violations", new ArrayList<>()));
+                validation.put("permits", routeData.getOrDefault("permits", new ArrayList<>()));
+                validation.put("infrastructureDetails", routeData.getOrDefault("infrastructureDetails", new ArrayList<>()));
+                validation.put("searchAttempts", routeData.getOrDefault("searchAttempts", 1));
+                validation.put("lightVehicle", routeData.getOrDefault("lightVehicle", false));
+
+                details.put("validation", validation);
+            }
+
+            return ResponseEntity.ok(details);
+
+        } catch (Exception e) {
+            log.error("Błąd pobierania szczegółów trasy: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * ✅ ENDPOINT - Pełne dane nawigacyjne dla kierowcy
      */
     @GetMapping("/{id}/navigation-data")
     @PreAuthorize("hasAnyRole('OPERATOR', 'DRIVER', 'ADMIN')")
@@ -120,7 +251,6 @@ public class RouteController {
                     navigationData.put("routeSource", "HERE_MAPS_VALIDATED");
                     log.info("✅ Zwracam zwalidowaną trasę HERE Maps dla route #{}", id);
                 }
-
                 // ✅ PRIORYTET 2: Google Maps routes (zapisana trasa)
                 else if (routeData.containsKey("routes")) {
                     navigationData.put("googleMapsRoutes", routeData.get("routes"));
@@ -128,15 +258,16 @@ public class RouteController {
                     log.info("🔵 Zwracam zapisaną trasę Google Maps dla route #{}", id);
                 }
 
-                // Dodaj walidację
+                // ✅ OSTRZEŻENIA I POZWOLENIA DLA KIEROWCY
                 navigationData.put("validation", Map.of(
                         "hasWarnings", routeData.getOrDefault("hasWarnings", false),
+                        "requiresPermit", routeData.getOrDefault("requiresPermit", false),
                         "warnings", routeData.getOrDefault("warnings", new ArrayList<>()),
+                        "permits", routeData.getOrDefault("permits", new ArrayList<>()),
                         "routeJustification", routeData.getOrDefault("routeJustification", new ArrayList<>()),
                         "transportSetInfo", routeData.getOrDefault("transportSet", new HashMap<>())
                 ));
             } else {
-                // Brak zapisanych danych - trasa będzie przeliczona na froncie
                 navigationData.put("routeSource", "NONE");
                 log.warn("⚠️ Brak zapisanych danych trasy dla route #{}", id);
             }
@@ -145,10 +276,14 @@ public class RouteController {
 
         } catch (Exception e) {
             log.error("Błąd pobierania danych nawigacyjnych: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 
+    /**
+     * ✅ ENDPOINT - Generowanie pliku GPX/KML z pełnymi danymi walidacji
+     */
     @GetMapping("/{id}/navigation-file")
     @PermitAll
     public ResponseEntity<?> getNavigationFile(

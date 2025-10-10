@@ -37,6 +37,7 @@ public class BridgeDataService {
             return MilitaryLoadCalculator.BridgeSpecification.builder()
                     .name(pointName)
                     .location(point.getRoadName())
+                    .city(extractCityFromTags(point)) // ✅ NOWE - wyciągnij miasto
                     .maxWeight(point.getMaxWeightTons() != null ?
                             BigDecimal.valueOf(point.getMaxWeightTons()) : null)
                     .maxHeight(point.getMaxHeightMeters() != null ?
@@ -67,6 +68,42 @@ public class BridgeDataService {
     }
 
     /**
+     * ✅ NOWA METODA - wyciągnij miasto z tagów OSM
+     */
+    private String extractCityFromTags(InfrastructurePoint point) {
+        if (point.getTags() == null) return null;
+
+        // Sprawdź najpierw tag "addr:city"
+        String city = point.getTags().get("addr:city");
+        if (city != null && !city.isEmpty()) {
+            return city;
+        }
+
+        // Sprawdź "is_in:city"
+        city = point.getTags().get("is_in:city");
+        if (city != null && !city.isEmpty()) {
+            return city;
+        }
+
+        // Sprawdź "addr:suburb" (dzielnica)
+        city = point.getTags().get("addr:suburb");
+        if (city != null && !city.isEmpty()) {
+            return city;
+        }
+
+        // Spróbuj wyciągnąć z nazwy (jeśli zawiera nazwę miasta)
+        String name = point.getName();
+        if (name != null && name.contains(",")) {
+            String[] parts = name.split(",");
+            if (parts.length > 1) {
+                return parts[1].trim();
+            }
+        }
+
+        return null; // Brak informacji o mieście
+    }
+
+    /**
      * ✅ SZCZEGÓŁOWE LOGOWANIE DANYCH OSM
      */
     private void logOsmData(String pointName, String pointType, InfrastructurePoint point) {
@@ -89,6 +126,12 @@ public class BridgeDataService {
         log.info("│  🔸 Droga:    {}", point.getRoadName() != null ? point.getRoadName() : "Nieznana");
         log.info("│  🔸 Typ:      {}", pointType);
         log.info("│  🔸 Źródło:   OpenStreetMap (zweryfikowane)");
+
+        String city = extractCityFromTags(point);
+        if (city != null) {
+            log.info("│  🔸 Miasto:   {}", city);
+        }
+
         log.info("└─────────────────────────────────────────────");
     }
 
@@ -192,6 +235,7 @@ public class BridgeDataService {
         return MilitaryLoadCalculator.BridgeSpecification.builder()
                 .name(point.getName())
                 .location(point.getRoadName())
+                .city(extractCityFromTags(point)) // ✅ NOWE
                 .maxWeight(maxWeight)
                 .maxHeight(maxHeight)
                 .maxWidth(new BigDecimal("4.0"))
@@ -265,6 +309,12 @@ public class BridgeDataService {
                 point.getMaxWeightTons() != null ? point.getMaxWeightTons() : "BRAK");
         log.info("║  Wysokość (OSM):  {} m",
                 point.getMaxHeightMeters() != null ? point.getMaxHeightMeters() : "BRAK");
+
+        String city = extractCityFromTags(point);
+        if (city != null) {
+            log.info("║  Miasto:          {}", city);
+        }
+
         log.info("╚═══════════════════════════════════════════════════════");
     }
 

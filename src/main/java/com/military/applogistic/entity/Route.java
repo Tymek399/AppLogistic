@@ -41,6 +41,6 @@ public class Route {
     private LocalDateTime completedAt;
 
     public enum RouteStatus {
-        CREATED, ASSIGNED, ACTIVE, COMPLETED
+        CREATED, ASSIGNED,IN_PROGRESS, ACTIVE, COMPLETED
     }
 }

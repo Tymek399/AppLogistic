@@ -160,6 +160,7 @@ public class MilitaryLoadCalculator {
     public static class BridgeSpecification {
         private String name;
         private String location;
+        private String city; // ✅ NOWE POLE
         private BigDecimal maxWeight;
         private BigDecimal maxHeight;
         private BigDecimal maxWidth;

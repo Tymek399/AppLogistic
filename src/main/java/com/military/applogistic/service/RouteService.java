@@ -6,6 +6,7 @@ import com.military.applogistic.repository.RouteRepository;
 import com.military.applogistic.repository.TransportSetRepository;
 import com.military.applogistic.dto.request.CreateRouteRequest;
 import com.military.applogistic.dto.response.RouteResponse;
+import com.military.applogistic.util.FlexiblePolyline;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class RouteService {
     private final TransportSetRepository transportSetRepository;
     private final GoogleMapsService googleMapsService;
     private final HereMapsService hereMapsService;
+    private final MilitaryRoadPermissions militaryRoadPermissions;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final int MAX_ROUTE_ATTEMPTS = 10;
@@ -130,7 +132,7 @@ public class RouteService {
         Map<String, Object> validatedRouteData = null;
 
         for (int attempt = 1; attempt <= MAX_ROUTE_ATTEMPTS; attempt++) {
-            log.info("╔═══════════════════════════════════╗");
+            log.info("╔═══════════════════════════════════════╗");
             log.info("PRÓBA #{} - Szukanie trasy...", attempt);
 
             if (!excludedBridges.isEmpty()) {
@@ -152,14 +154,7 @@ public class RouteService {
                 );
                 allAttempts.add(attemptReport);
 
-//                // ✅ KROK 3: Sprawdź czy trasa CAŁKOWICIE ZABLOKOWANA
-//                if (attemptReport.getBlockedBridges() >= 999) {
-//                    log.error("🚨 Trasa całkowicie zablokowana - brak sensu dalszych prób");
-//                    log.error("Powód: {}", attemptReport.getViolations());
-//                    break; // Przerwij szukanie - wszystkie trasy są zablokowane
-//                }
-
-                // ✅ KROK 4: Jeśli trasa przejezdna - zapisz i zakończ
+                // ✅ KROK 3: Jeśli trasa przejezdna - zapisz i zakończ
                 if (attemptReport.isFullyPassable()) {
                     log.info("🎉 SUKCES! Znaleziono przejezdną trasę w próbie #{}", attempt);
 
@@ -173,10 +168,11 @@ public class RouteService {
                     break;
                 }
 
-                // ✅ KROK 5: Jeśli trasa zablokowana - dodaj mosty do wykluczeń
+                // ✅ KROK 4: Jeśli trasa zablokowana - dodaj mosty do wykluczeń
                 List<String> criticalBridges = attemptReport.getCriticalBridges();
                 if (criticalBridges.isEmpty()) {
                     log.warn("⚠️ Brak możliwych tras dalej - wszystkie opcje wyczerpane");
+                    break;
                 }
 
                 // Dodaj krytyczne mosty do wykluczeń
@@ -194,12 +190,12 @@ public class RouteService {
             }
         }
 
-        // ✅ KROK 6: Jeśli znaleziono trasę - zapisz do bazy
+        // ✅ KROK 5: Jeśli znaleziono trasę - zapisz do bazy
         if (validatedRouteData != null) {
             return saveValidatedRoute(request, transportSet, createdByUsername, validatedRouteData);
         }
 
-        // ✅ KROK 7: Jeśli nie znaleziono trasy - zwróć błąd
+        // ✅ KROK 6: Jeśli nie znaleziono trasy - zwróć błąd
         log.error("💥 BRAK FIZYCZNIE MOŻLIWEJ TRASY po {} próbach", allAttempts.size());
         throw buildNoRouteException(transportSet, allAttempts);
     }
@@ -231,14 +227,31 @@ public class RouteService {
             return report;
         }
 
+        // ✅ SPRAWDŹ CZY WYMAGA POZWOLENIA (NIE BLOKUJ!)
+        if (Boolean.TRUE.equals(routeData.get("requiresPermit"))) {
+            List<String> permits = (List<String>) routeData.getOrDefault("permits", new ArrayList<>());
+            log.info("⚠️ Trasa wymaga pozwolenia w próbie #{}: {}", attemptNumber, permits);
+
+            report.setPassable(true); // ✅ PRZEJEZDNA, TYLKO WYMAGA POZWOLENIA
+            report.setRequiresPermit(true);
+            report.setPermits(permits);
+            report.setBlockedBridges(0);
+            report.setCriticalBridges(new ArrayList<>());
+            report.setSuccessScore(90); // Wysoki wynik, bo trasa OK
+
+            return report;
+        }
+
         // Pobierz dane z walidacji
         List<String> violations = (List<String>) routeData.getOrDefault("violations", new ArrayList<>());
         List<String> restrictions = (List<String>) routeData.getOrDefault("restrictions", new ArrayList<>());
+        List<String> permits = (List<String>) routeData.getOrDefault("permits", new ArrayList<>());
         List<Map<String, Object>> infrastructure =
                 (List<Map<String, Object>>) routeData.getOrDefault("infrastructureDetails", new ArrayList<>());
 
         report.setViolations(violations);
         report.setRestrictions(restrictions);
+        report.setPermits(permits);
         report.setTotalInfrastructureChecked(infrastructure.size());
 
         // ✅ SPRAWDŹ CZY WSZYSTKIE MOSTY/TUNELE SĄ PRZEJEZDNE
@@ -248,6 +261,7 @@ public class RouteService {
 
         report.setBlockedBridges((int) blockedBridges);
         report.setPassable(violations.isEmpty() && blockedBridges == 0);
+        report.setRequiresPermit(!permits.isEmpty());
 
         // Zbierz nazwy zablokowanych obiektów
         List<String> criticalBridges = infrastructure.stream()
@@ -267,11 +281,17 @@ public class RouteService {
         log.info("   ✓ Sprawdzono obiektów: {}", infrastructure.size());
         log.info("   ✓ Zablokowanych: {}", blockedBridges);
         log.info("   ✓ Naruszeń: {}", violations.size());
+        log.info("   ✓ Pozwoleń wymaganych: {}", permits.size());
         log.info("   ✓ Przejezdna: {}", report.isPassable() ? "TAK" : "NIE");
 
         if (!criticalBridges.isEmpty()) {
             log.warn("   🚫 Zablokowane obiekty:");
             criticalBridges.forEach(b -> log.warn("      - {}", b));
+        }
+
+        if (!permits.isEmpty()) {
+            log.info("   ⚠️ Wymagane pozwolenia:");
+            permits.forEach(p -> log.info("      - {}", p));
         }
 
         return report;
@@ -287,6 +307,9 @@ public class RouteService {
         score -= report.getViolations().size() * 30;
         score -= report.getBlockedBridges() * 25;
         score -= report.getRestrictions().size() * 10;
+
+        // Mniejsza kara za pozwolenia (tylko 5 punktów)
+        score -= report.getPermits().size() * 5;
 
         // Bonus za sprawdzenie wielu obiektów (dokładność)
         score += Math.min(report.getTotalInfrastructureChecked() * 0.5, 10);
@@ -308,6 +331,13 @@ public class RouteService {
         validationSummary.put("totalAttempts", routeData.get("searchAttempts"));
         validationSummary.put("validationCompleted", true);
         validationSummary.put("validatedAt", LocalDateTime.now().toString());
+
+        // ✅ Dodaj info o pozwoleniach
+        if (routeData.containsKey("permits") && !((List) routeData.get("permits")).isEmpty()) {
+            validationSummary.put("requiresPermits", true);
+            validationSummary.put("permits", routeData.get("permits"));
+        }
+
         routeData.put("validationSummary", validationSummary);
 
         Route route = buildRouteEntity(request, transportSet, createdByUsername, routeData);
@@ -331,7 +361,7 @@ public class RouteService {
 
         if (totalBlockage) {
             message.append("🚨 CAŁKOWITA BLOKADA TRASY\n");
-            message.append("═══════════════════════════════════════════════════\n");
+            message.append("═══════════════════════════════════════════════\n");
             RouteAttemptReport blockedAttempt = allAttempts.stream()
                     .filter(r -> r.getBlockedBridges() >= 999)
                     .findFirst()
@@ -345,14 +375,14 @@ public class RouteService {
             }
 
             message.append("\n💡 Rozwiązania:\n");
-            message.append("─────────────────────────────────────────────────────\n");
+            message.append("───────────────────────────────────────────────────\n");
             message.append("1. Zmień zestaw transportowy na lżejszy/niższy\n");
             message.append("2. Rozważ transport na kilka mniejszych zestawów\n");
             message.append("3. Skontaktuj się z zarządem dróg w sprawie pozwoleń specjalnych\n");
 
         } else {
             message.append("📊 Podsumowanie walidacji:\n");
-            message.append("═══════════════════════════════════════════════════\n");
+            message.append("═══════════════════════════════════════════════\n");
             message.append(String.format("• Sprawdzono %d alternatywnych tras\n", allAttempts.size()));
             message.append(String.format("• Waga zestawu: %.1f ton\n", transportSet.getTotalWeightKg() / 1000.0));
             message.append(String.format("• Wysokość zestawu: %.2f m\n", transportSet.getTotalHeightCm() / 100.0));
@@ -368,7 +398,7 @@ public class RouteService {
             message.append(String.format("• Zablokowanych obiektów: %d\n", totalBlocked));
 
             message.append("\n💡 Sugerowane rozwiązania:\n");
-            message.append("─────────────────────────────────────────────────────\n");
+            message.append("───────────────────────────────────────────────────\n");
             message.append("1. Zmień zestaw transportowy na lżejszy/niższy\n");
             message.append("2. Rozważ transport na kilka mniejszych zestawów\n");
             message.append("3. Skontaktuj się z operatorem tras specjalnych\n");
@@ -381,7 +411,7 @@ public class RouteService {
      * ✅ LOGUJE PARAMETRY ZESTAWU
      */
     private void logTransportSetParameters(TransportSet ts) {
-        log.info("╔═══════════════════════════════════╗");
+        log.info("╔════════════════════════════════════╗");
         log.info("PARAMETRY ZESTAWU: {}", ts.getDescription());
         log.info("────────────────────────────────────");
         log.info("Waga: {} kg ({} ton)", ts.getTotalWeightKg(), ts.getTotalWeightKg() / 1000.0);
@@ -390,7 +420,7 @@ public class RouteService {
         log.info("Szerokość: {} cm ({} m)", ts.getTotalWidthCm(), ts.getTotalWidthCm() / 100.0);
         log.info("Max nacisk na oś: {} kg ({} t)", ts.getMaxAxleLoadKg(), ts.getMaxAxleLoadKg() / 1000.0);
         log.info("Typ naczepy: {}", ts.getTrailerType());
-        log.info("╚═══════════════════════════════════╝");
+        log.info("╚════════════════════════════════════╝");
     }
 
     /**
@@ -478,12 +508,12 @@ public class RouteService {
         return response;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // POZOSTAŁE METODY (bez zmian)
-    // ═══════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════
+    // GENEROWANIE PLIKÓW NAWIGACYJNYCH (GPX, KML) - POPRAWIONE
+    // ═══════════════════════════════════════════════════════════════════
 
     /**
-     * ✅ GENEROWANIE PLIKU GPX
+     * ✅ POPRAWIONE GENEROWANIE PLIKU GPX/KML
      */
     public byte[] generateNavigationFile(Long routeId, String format) {
         Route route = routeRepository.findById(routeId)
@@ -509,45 +539,86 @@ public class RouteService {
         }
     }
 
+    /**
+     * ✅ POPRAWIONE GENEROWANIE GPX - Z OBSŁUGĄ POLYLINE
+     */
     private String generateGpx(Map<String, Object> routeData, Route route) {
         StringBuilder gpx = new StringBuilder();
         gpx.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         gpx.append("<gpx version=\"1.1\" creator=\"MilitaryLogisticOps\" ");
-        gpx.append("xmlns=\"http://www.topografix.com/GPX/1/1\" ");
-        gpx.append("xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ");
-        gpx.append("xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\">\n");
+        gpx.append("xmlns=\"http://www.topografix.com/GPX/1/1\">\n");
+
         gpx.append("  <metadata>\n");
-        gpx.append("    <name>Military Route #").append(route.getId()).append("</name>\n");
-        gpx.append("    <desc>").append(route.getStartAddress()).append(" → ").append(route.getEndAddress()).append("</desc>\n");
-        gpx.append("    <time>").append(java.time.Instant.now().toString()).append("</time>\n");
-        gpx.append("  </metadata>\n");
-        gpx.append("  <trk>\n");
-        gpx.append("    <name>Transport Route</name>\n");
-        gpx.append("    <trkseg>\n");
+        gpx.append("    <name>").append(escapeXml(route.getStartAddress())).append(" → ")
+                .append(escapeXml(route.getEndAddress())).append("</name>\n");
+        gpx.append("    <desc>Trasa wojskowa - Transport ID: ").append(route.getTransportSet().getId()).append("</desc>\n");
+        gpx.append("    <time>").append(LocalDateTime.now()).append("</time>\n");
+        gpx.append("  </metadata>\n\n");
 
-        try {
-            List<Map<String, Object>> routes = (List<Map<String, Object>>) routeData.get("routes");
-            if (routes != null && !routes.isEmpty()) {
-                Map<String, Object> routeMap = routes.get(0);
-                Map<String, Object> overviewPolyline = (Map<String, Object>) routeMap.get("overview_polyline");
+        // Punkty startowy i końcowy
+        gpx.append("  <wpt lat=\"").append(route.getStartLatitude())
+                .append("\" lon=\"").append(route.getStartLongitude()).append("\">\n");
+        gpx.append("    <name>START</name>\n");
+        gpx.append("    <desc>").append(escapeXml(route.getStartAddress())).append("</desc>\n");
+        gpx.append("  </wpt>\n\n");
 
-                if (overviewPolyline != null) {
-                    String encodedPolyline = (String) overviewPolyline.get("points");
-                    if (encodedPolyline != null) {
-                        List<double[]> coordinates = decodePolyline(encodedPolyline);
+        gpx.append("  <wpt lat=\"").append(route.getEndLatitude())
+                .append("\" lon=\"").append(route.getEndLongitude()).append("\">\n");
+        gpx.append("    <name>KONIEC</name>\n");
+        gpx.append("    <desc>").append(escapeXml(route.getEndAddress())).append("</desc>\n");
+        gpx.append("  </wpt>\n\n");
 
-                        for (double[] coord : coordinates) {
-                            gpx.append(String.format(Locale.US,
-                                    "      <trkpt lat=\"%.6f\" lon=\"%.6f\"></trkpt>\n",
-                                    coord[0], coord[1]));
-                        }
-                    }
-                }
+        // ✅ PRIORYTET 1: HERE Maps polyline (najdokładniejsza)
+        String herePolyline = (String) routeData.get("herePolyline");
+        if (herePolyline != null && !herePolyline.isEmpty()) {
+            log.info("📍 Używam HERE Maps polyline do generowania GPX");
+            try {
+                List<FlexiblePolyline.LatLng> coordinates = FlexiblePolyline.decode(herePolyline);
+                appendHereTrackToGpx(gpx, coordinates, "Trasa HERE Maps");
+                gpx.append("</gpx>");
+                return gpx.toString();
+            } catch (Exception e) {
+                log.warn("⚠️ Błąd dekodowania HERE polyline: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.error("Error generating GPX coordinates: {}", e.getMessage());
         }
 
+        // ✅ PRIORYTET 2: Google Maps routes (POPRAWIONE PARSOWANIE)
+        List<Map<String, Object>> routes = (List<Map<String, Object>>) routeData.get("routes");
+        if (routes != null && !routes.isEmpty()) {
+            Map<String, Object> firstRoute = routes.get(0);
+
+            // ✅ POPRAWKA: overview_polyline może być obiektem
+            Object polylineObj = firstRoute.get("overview_polyline");
+            String encodedPolyline = null;
+
+            if (polylineObj instanceof String) {
+                encodedPolyline = (String) polylineObj;
+            } else if (polylineObj instanceof Map) {
+                encodedPolyline = (String) ((Map<String, Object>) polylineObj).get("points");
+            }
+
+            if (encodedPolyline != null && !encodedPolyline.isEmpty()) {
+                log.info("📍 Używam Google Maps polyline do generowania GPX");
+                try {
+                    List<double[]> coordinates = decodeGooglePolyline(encodedPolyline);
+                    appendGoogleTrackToGpx(gpx, coordinates, "Trasa Google Maps");
+                    gpx.append("</gpx>");
+                    return gpx.toString();
+                } catch (Exception e) {
+                    log.warn("⚠️ Błąd dekodowania Google polyline: {}", e.getMessage());
+                }
+            }
+        }
+
+        // ✅ FALLBACK: Proste połączenie start-koniec
+        log.warn("⚠️ Brak polyline - używam prostej linii między punktami");
+        gpx.append("  <trk>\n");
+        gpx.append("    <name>Trasa podstawowa</name>\n");
+        gpx.append("    <trkseg>\n");
+        gpx.append("      <trkpt lat=\"").append(route.getStartLatitude())
+                .append("\" lon=\"").append(route.getStartLongitude()).append("\"/>\n");
+        gpx.append("      <trkpt lat=\"").append(route.getEndLatitude())
+                .append("\" lon=\"").append(route.getEndLongitude()).append("\"/>\n");
         gpx.append("    </trkseg>\n");
         gpx.append("  </trk>\n");
         gpx.append("</gpx>");
@@ -555,306 +626,535 @@ public class RouteService {
         return gpx.toString();
     }
 
+    /**
+     * ✅ DODAJE TRACK DO GPX Z LISTY WSPÓŁRZĘDNYCH HERE MAPS (LatLng)
+     */
+    private void appendHereTrackToGpx(StringBuilder gpx, List<FlexiblePolyline.LatLng> coordinates, String trackName) {
+        gpx.append("  <trk>\n");
+        gpx.append("    <name>").append(escapeXml(trackName)).append("</name>\n");
+        gpx.append("    <trkseg>\n");
+
+        for (FlexiblePolyline.LatLng coord : coordinates) {
+            gpx.append("      <trkpt lat=\"").append(coord.lat)
+                    .append("\" lon=\"").append(coord.lng).append("\"/>\n");
+        }
+
+        gpx.append("    </trkseg>\n");
+        gpx.append("  </trk>\n");
+    }
+
+    /**
+     * ✅ DODAJE TRACK DO GPX Z LISTY WSPÓŁRZĘDNYCH GOOGLE MAPS (double[])
+     */
+    private void appendGoogleTrackToGpx(StringBuilder gpx, List<double[]> coordinates, String trackName) {
+        gpx.append("  <trk>\n");
+        gpx.append("    <name>").append(escapeXml(trackName)).append("</name>\n");
+        gpx.append("    <trkseg>\n");
+
+        for (double[] coord : coordinates) {
+            gpx.append("      <trkpt lat=\"").append(coord[0])
+                    .append("\" lon=\"").append(coord[1]).append("\"/>\n");
+        }
+
+        gpx.append("    </trkseg>\n");
+        gpx.append("  </trk>\n");
+    }
+
+    /**
+     * ✅ POPRAWIONE GENEROWANIE KML - Z OBSŁUGĄ POLYLINE
+     */
     private String generateKml(Map<String, Object> routeData, Route route) {
         StringBuilder kml = new StringBuilder();
         kml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         kml.append("<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n");
         kml.append("  <Document>\n");
-        kml.append("    <name>Military Route #").append(route.getId()).append("</name>\n");
-        kml.append("    <description>").append(route.getStartAddress()).append(" → ").append(route.getEndAddress()).append("</description>\n");
+        kml.append("    <name>").append(escapeXml(route.getStartAddress())).append(" → ")
+                .append(escapeXml(route.getEndAddress())).append("</name>\n");
+        kml.append("    <description>Trasa wojskowa - Transport ID: ")
+                .append(route.getTransportSet().getId()).append("</description>\n\n");
+
+        // Style dla trasy
         kml.append("    <Style id=\"routeStyle\">\n");
         kml.append("      <LineStyle>\n");
-        kml.append("        <color>ff0000ff</color>\n");
+        kml.append("        <color>ff0000ff</color>\n"); // Czerwony
         kml.append("        <width>4</width>\n");
         kml.append("      </LineStyle>\n");
-        kml.append("    </Style>\n");
+        kml.append("    </Style>\n\n");
+
+        // Punkt startowy
         kml.append("    <Placemark>\n");
-        kml.append("      <name>Transport Route</name>\n");
+        kml.append("      <name>START</name>\n");
+        kml.append("      <description>").append(escapeXml(route.getStartAddress())).append("</description>\n");
+        kml.append("      <Point>\n");
+        kml.append("        <coordinates>").append(route.getStartLongitude())
+                .append(",").append(route.getStartLatitude()).append(",0</coordinates>\n");
+        kml.append("      </Point>\n");
+        kml.append("    </Placemark>\n\n");
+
+        // Punkt końcowy
+        kml.append("    <Placemark>\n");
+        kml.append("      <name>KONIEC</name>\n");
+        kml.append("      <description>").append(escapeXml(route.getEndAddress())).append("</description>\n");
+        kml.append("      <Point>\n");
+        kml.append("        <coordinates>").append(route.getEndLongitude())
+                .append(",").append(route.getEndLatitude()).append(",0</coordinates>\n");
+        kml.append("      </Point>\n");
+        kml.append("    </Placemark>\n\n");
+
+        // ✅ PRIORYTET 1: HERE Maps polyline
+        String herePolyline = (String) routeData.get("herePolyline");
+        if (herePolyline != null && !herePolyline.isEmpty()) {
+            log.info("📍 Używam HERE Maps polyline do generowania KML");
+            try {
+                List<FlexiblePolyline.LatLng> coordinates = FlexiblePolyline.decode(herePolyline);
+                appendHereLineStringToKml(kml, coordinates, "Trasa HERE Maps");
+                kml.append("  </Document>\n</kml>");
+                return kml.toString();
+            } catch (Exception e) {
+                log.warn("⚠️ Błąd dekodowania HERE polyline: {}", e.getMessage());
+            }
+        }
+
+        // ✅ PRIORYTET 2: Google Maps polyline (POPRAWIONE PARSOWANIE)
+        List<Map<String, Object>> routes = (List<Map<String, Object>>) routeData.get("routes");
+        if (routes != null && !routes.isEmpty()) {
+            Map<String, Object> firstRoute = routes.get(0);
+
+            // ✅ POPRAWKA: overview_polyline może być obiektem
+            Object polylineObj = firstRoute.get("overview_polyline");
+            String encodedPolyline = null;
+
+            if (polylineObj instanceof String) {
+                encodedPolyline = (String) polylineObj;
+            } else if (polylineObj instanceof Map) {
+                encodedPolyline = (String) ((Map<String, Object>) polylineObj).get("points");
+            }
+
+            if (encodedPolyline != null && !encodedPolyline.isEmpty()) {
+                log.info("📍 Używam Google Maps polyline do generowania KML");
+                try {
+                    List<double[]> coordinates = decodeGooglePolyline(encodedPolyline);
+                    appendGoogleLineStringToKml(kml, coordinates, "Trasa Google Maps");
+                    kml.append("  </Document>\n</kml>");
+                    return kml.toString();
+                } catch (Exception e) {
+                    log.warn("⚠️ Błąd dekodowania Google polyline: {}", e.getMessage());
+                }
+            }
+        }
+
+        // ✅ FALLBACK: Proste połączenie
+        log.warn("⚠️ Brak polyline - używam prostej linii między punktami");
+        kml.append("    <Placemark>\n");
+        kml.append("      <name>Trasa podstawowa</name>\n");
+        kml.append("      <styleUrl>#routeStyle</styleUrl>\n");
+        kml.append("      <LineString>\n");
+        kml.append("        <coordinates>\n");
+        kml.append("          ").append(route.getStartLongitude()).append(",")
+                .append(route.getStartLatitude()).append(",0\n");
+        kml.append("          ").append(route.getEndLongitude()).append(",")
+                .append(route.getEndLatitude()).append(",0\n");
+        kml.append("        </coordinates>\n");
+        kml.append("      </LineString>\n");
+        kml.append("    </Placemark>\n");
+        kml.append("  </Document>\n</kml>");
+
+        return kml.toString();
+    }
+
+    /**
+     * ✅ DODAJE LINESTRING DO KML Z LISTY WSPÓŁRZĘDNYCH HERE MAPS (LatLng)
+     */
+    private void appendHereLineStringToKml(StringBuilder kml, List<FlexiblePolyline.LatLng> coordinates, String name) {
+        kml.append("    <Placemark>\n");
+        kml.append("      <name>").append(escapeXml(name)).append("</name>\n");
         kml.append("      <styleUrl>#routeStyle</styleUrl>\n");
         kml.append("      <LineString>\n");
         kml.append("        <tessellate>1</tessellate>\n");
         kml.append("        <coordinates>\n");
 
-        try {
-            List<Map<String, Object>> routes = (List<Map<String, Object>>) routeData.get("routes");
-            if (routes != null && !routes.isEmpty()) {
-                Map<String, Object> routeMap = routes.get(0);
-                Map<String, Object> overviewPolyline = (Map<String, Object>) routeMap.get("overview_polyline");
-
-                if (overviewPolyline != null) {
-                    String encodedPolyline = (String) overviewPolyline.get("points");
-                    if (encodedPolyline != null) {
-                        List<double[]> coordinates = decodePolyline(encodedPolyline);
-
-                        for (double[] coord : coordinates) {
-                            kml.append(String.format(Locale.US,
-                                    "          %.6f,%.6f,0\n", coord[1], coord[0]));
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.error("Error generating KML coordinates: {}", e.getMessage());
+        for (FlexiblePolyline.LatLng coord : coordinates) {
+            kml.append("          ").append(coord.lng).append(",")
+                    .append(coord.lat).append(",0\n");
         }
 
         kml.append("        </coordinates>\n");
         kml.append("      </LineString>\n");
         kml.append("    </Placemark>\n");
-        kml.append("  </Document>\n");
-        kml.append("</kml>");
-
-        return kml.toString();
     }
 
-    private List<double[]> decodePolyline(String encoded) {
-        List<double[]> path = new ArrayList<>();
-        int index = 0;
-        int len = encoded.length();
-        int lat = 0;
-        int lng = 0;
+    /**
+     * ✅ DODAJE LINESTRING DO KML Z LISTY WSPÓŁRZĘDNYCH GOOGLE MAPS (double[])
+     */
+    private void appendGoogleLineStringToKml(StringBuilder kml, List<double[]> coordinates, String name) {
+        kml.append("    <Placemark>\n");
+        kml.append("      <name>").append(escapeXml(name)).append("</name>\n");
+        kml.append("      <styleUrl>#routeStyle</styleUrl>\n");
+        kml.append("      <LineString>\n");
+        kml.append("        <tessellate>1</tessellate>\n");
+        kml.append("        <coordinates>\n");
+
+        for (double[] coord : coordinates) {
+            kml.append("          ").append(coord[1]).append(",")
+                    .append(coord[0]).append(",0\n");
+        }
+
+        kml.append("        </coordinates>\n");
+        kml.append("      </LineString>\n");
+        kml.append("    </Placemark>\n");
+    }
+
+    /**
+     * ✅ DEKODOWANIE GOOGLE POLYLINE
+     */
+    private List<double[]> decodeGooglePolyline(String encoded) {
+        List<double[]> coordinates = new ArrayList<>();
+        int index = 0, len = encoded.length();
+        int lat = 0, lng = 0;
 
         while (index < len) {
-            int b;
-            int shift = 0;
-            int result = 0;
+            int b, shift = 0, result = 0;
             do {
-                if (index >= len) break;
                 b = encoded.charAt(index++) - 63;
                 result |= (b & 0x1f) << shift;
                 shift += 5;
-            } while (b >= 0x20 && index < len);
-
+            } while (b >= 0x20);
             int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
             lat += dlat;
 
             shift = 0;
             result = 0;
             do {
-                if (index >= len) break;
                 b = encoded.charAt(index++) - 63;
                 result |= (b & 0x1f) << shift;
                 shift += 5;
-            } while (b >= 0x20 && index < len);
-
+            } while (b >= 0x20);
             int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
             lng += dlng;
 
-            path.add(new double[]{lat / 1E5, lng / 1E5});
+            coordinates.add(new double[]{lat / 1E5, lng / 1E5});
         }
 
-        return path;
+        return coordinates;
     }
 
-    @Transactional(readOnly = true)
-    public List<RouteResponse> getRoutesByDriver(String driverUsername) {
-        return routeRepository.findByAssignedDriverUsername(driverUsername).stream()
-                .map(r -> convertToResponse(r, null))
-                .collect(Collectors.toList());
+    /**
+     * ✅ ESCAPE XML CHARACTERS
+     */
+    private String escapeXml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
-    @Transactional(readOnly = true)
-    public List<RouteResponse> getAllRoutes() {
-        return routeRepository.findAll().stream()
-                .map(r -> convertToResponse(r, null))
-                .collect(Collectors.toList());
-    }
+    // ═══════════════════════════════════════════════════════════════════
+    // ZARZĄDZANIE TRASAMI - CRUD I OPERACJE
+    // ═══════════════════════════════════════════════════════════════════
 
-    @Transactional(readOnly = true)
-    public List<RouteResponse> getActiveRoutes() {
-        return routeRepository.findActiveRoutes().stream()
-                .map(r -> convertToResponse(r, null))
-                .collect(Collectors.toList());
-    }
-
-    @Transactional(readOnly = true)
-    public RouteResponse getRouteById(Long id) {
-        Route route = routeRepository.findById(id)
+    /**
+     * ✅ POBIERZ SZCZEGÓŁY WALIDACJI TRASY
+     */
+    public Map<String, Object> getValidationDetails(Long routeId) {
+        Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Route not found"));
-        return convertToResponse(route, null);
+
+        Map<String, Object> details = new HashMap<>();
+        details.put("routeId", routeId);
+        details.put("status", route.getStatus());
+
+        try {
+            if (route.getRouteDataJson() != null && !route.getRouteDataJson().equals("{}")) {
+                Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
+
+                details.put("hasRestrictions", routeData.getOrDefault("hasRestrictions", false));
+                details.put("hasWarnings", routeData.getOrDefault("hasWarnings", false));
+                details.put("requiresPermit", routeData.getOrDefault("requiresPermit", false));
+                details.put("warnings", routeData.getOrDefault("warnings", new ArrayList<>()));
+                details.put("violations", routeData.getOrDefault("violations", new ArrayList<>()));
+                details.put("permits", routeData.getOrDefault("permits", new ArrayList<>()));
+                details.put("infrastructureDetails", routeData.getOrDefault("infrastructureDetails", new ArrayList<>()));
+                details.put("attemptReports", routeData.getOrDefault("attemptReports", new ArrayList<>()));
+                details.put("searchAttempts", routeData.getOrDefault("searchAttempts", 1));
+            }
+        } catch (Exception e) {
+            log.error("Error parsing validation details", e);
+        }
+
+        return details;
     }
 
+    /**
+     * ✅ PRZYPISZ KIEROWCĘ DO TRASY
+     */
     public RouteResponse assignDriverToRoute(Long routeId, String driverUsername) {
-        Route route = routeRepository.findById(routeId)
-                .orElseThrow(() -> new RuntimeException("Route not found"));
-        route.setAssignedDriverUsername(driverUsername);
-        route.setStatus(Route.RouteStatus.ASSIGNED);
-        route.setAssignedAt(LocalDateTime.now());
-        return convertToResponse(routeRepository.save(route), null);
-    }
-
-    public RouteResponse startRoute(Long routeId, String driverUsername) {
-        Route route = routeRepository.findById(routeId)
-                .orElseThrow(() -> new RuntimeException("Route not found"));
-        if (!driverUsername.equals(route.getAssignedDriverUsername())) {
-            throw new RuntimeException("Driver not assigned to this route");
-        }
-        route.setStatus(Route.RouteStatus.ACTIVE);
-        route.setStartedAt(LocalDateTime.now());
-        return convertToResponse(routeRepository.save(route), null);
-    }
-
-    public RouteResponse completeRoute(Long routeId) {
-        Route route = routeRepository.findById(routeId)
-                .orElseThrow(() -> new RuntimeException("Route not found"));
-        route.setStatus(Route.RouteStatus.COMPLETED);
-        route.setCompletedAt(LocalDateTime.now());
-        return convertToResponse(routeRepository.save(route), null);
-    }
-
-    public void deleteRoute(Long routeId) {
-        routeRepository.deleteById(routeId);
-    }
-
-    public RouteResponse changeTransportSet(Long routeId, Long newTransportSetId) {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Route not found"));
 
         if (route.getStatus() != Route.RouteStatus.CREATED) {
-            throw new RuntimeException("Can only change transport set for CREATED routes");
+            throw new RuntimeException("Cannot assign driver - route is not in CREATED status");
+        }
+
+        route.setAssignedDriverUsername(driverUsername);
+        route.setStatus(Route.RouteStatus.ASSIGNED);
+        Route savedRoute = routeRepository.save(route);
+
+        log.info("✅ Assigned driver {} to route #{}", driverUsername, routeId);
+
+        return RouteResponse.from(savedRoute);
+    }
+
+    /**
+     * ✅ ZMIEŃ ZESTAW TRANSPORTOWY
+     */
+    public RouteResponse changeTransportSet(Long routeId, Long newTransportSetId) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+
+        if (route.getStatus() == Route.RouteStatus.IN_PROGRESS ||
+                route.getStatus() == Route.RouteStatus.COMPLETED) {
+            throw new RuntimeException("Cannot change transport set - route is already in progress or completed");
         }
 
         TransportSet newTransportSet = transportSetRepository.findById(newTransportSetId)
                 .orElseThrow(() -> new RuntimeException("Transport set not found"));
 
         route.setTransportSet(newTransportSet);
-        return convertToResponse(routeRepository.save(route), null);
+        Route savedRoute = routeRepository.save(route);
+
+        log.info("✅ Changed transport set for route #{} to #{}", routeId, newTransportSetId);
+
+        return RouteResponse.from(savedRoute);
     }
 
+    /**
+     * ✅ ROZPOCZNIJ TRASĘ
+     */
+    public RouteResponse startRoute(Long routeId, String driverUsername) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+
+        if (!driverUsername.equals(route.getAssignedDriverUsername())) {
+            throw new RuntimeException("This route is not assigned to you");
+        }
+
+        if (route.getStatus() != Route.RouteStatus.ASSIGNED) {
+            throw new RuntimeException("Route must be in ASSIGNED status to start");
+        }
+
+        route.setStatus(Route.RouteStatus.IN_PROGRESS);
+        route.setStartedAt(LocalDateTime.now());
+        Route savedRoute = routeRepository.save(route);
+
+        log.info("✅ Route #{} started by driver {}", routeId, driverUsername);
+
+        return RouteResponse.from(savedRoute);
+    }
+
+    /**
+     * ✅ ZAKOŃCZ TRASĘ
+     */
+    public RouteResponse completeRoute(Long routeId) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+
+        if (route.getStatus() != Route.RouteStatus.IN_PROGRESS) {
+            throw new RuntimeException("Route must be in progress to complete");
+        }
+
+        route.setStatus(Route.RouteStatus.COMPLETED);
+        route.setCompletedAt(LocalDateTime.now());
+        Route savedRoute = routeRepository.save(route);
+
+        log.info("✅ Route #{} completed", routeId);
+
+        return RouteResponse.from(savedRoute);
+    }
+
+    /**
+     * ✅ POBIERZ TRASY KIEROWCY
+     */
+    public List<RouteResponse> getRoutesByDriver(String driverUsername) {
+        List<Route> routes = routeRepository.findByAssignedDriverUsername(driverUsername);
+        return routes.stream()
+                .map(RouteResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * ✅ POBIERZ WSZYSTKIE TRASY
+     */
+    public List<RouteResponse> getAllRoutes() {
+        List<Route> routes = routeRepository.findAll();
+        return routes.stream()
+                .map(RouteResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * ✅ POBIERZ AKTYWNE TRASY
+     */
+    public List<RouteResponse> getActiveRoutes() {
+        List<Route> routes = routeRepository.findByStatusIn(
+                Arrays.asList(Route.RouteStatus.ASSIGNED, Route.RouteStatus.IN_PROGRESS)
+        );
+        return routes.stream()
+                .map(RouteResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * ✅ POBIERZ TRASĘ PO ID
+     */
+    public RouteResponse getRouteById(Long routeId) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+        return RouteResponse.from(route);
+    }
+
+    /**
+     * ✅ USUŃ TRASĘ
+     */
+    public void deleteRoute(Long routeId) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RuntimeException("Route not found"));
+
+        if (route.getStatus() == Route.RouteStatus.IN_PROGRESS) {
+            throw new RuntimeException("Cannot delete route in progress");
+        }
+
+        routeRepository.delete(route);
+        log.info("✅ Route #{} deleted", routeId);
+    }
+
+    /**
+     * ✅ REWALIDUJ TRASĘ
+     */
     public RouteResponse revalidateRoute(Long routeId) {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Route not found"));
 
-        Map<String, Object> newValidation = hereMapsService.validateRoute(
-                route.getStartLatitude(),
-                route.getStartLongitude(),
-                route.getEndLatitude(),
-                route.getEndLongitude(),
-                route.getTransportSet().getTotalWeightKg(),
-                route.getTransportSet().getTotalHeightCm(),
-                null
-        );
+        // Utwórz nowy request z danych istniejącej trasy
+        CreateRouteRequest request = new CreateRouteRequest();
+        request.setStartAddress(route.getStartAddress());
+        request.setEndAddress(route.getEndAddress());
+        request.setStartLatitude(route.getStartLatitude());
+        request.setStartLongitude(route.getStartLongitude());
+        request.setEndLatitude(route.getEndLatitude());
+        request.setEndLongitude(route.getEndLongitude());
+        request.setTransportSetId(route.getTransportSet().getId());
 
-        try {
-            Map<String, Object> routeData = route.getRouteDataJson() != null && !route.getRouteDataJson().equals("{}") ?
-                    objectMapper.readValue(route.getRouteDataJson(), Map.class) : new HashMap<>();
+        log.info("♻️ Rewalidacja trasy #{}", routeId);
 
-            routeData.putAll(newValidation);
-            routeData.put("last_validation", LocalDateTime.now().toString());
-            routeData.put("revalidated", true);
+        // Usuń starą trasę
+        routeRepository.delete(route);
 
-            route.setRouteDataJson(objectMapper.writeValueAsString(routeData));
-            routeRepository.save(route);
-
-            return convertToResponse(route, routeData);
-
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to update route validation");
-        }
+        // Utwórz nową trasę z pełną walidacją
+        return createRoute(request, route.getCreatedByUsername());
     }
 
-    public Map<String, Object> getValidationDetails(Long routeId) {
-        try {
-            Route route = routeRepository.findById(routeId)
-                    .orElseThrow(() -> new RuntimeException("Route not found"));
-
-            if (route.getRouteDataJson() == null || route.getRouteDataJson().equals("{}")) {
-                Map<String, Object> noData = new HashMap<>();
-                noData.put("routeId", routeId);
-                noData.put("validationAvailable", false);
-                noData.put("message", "Brak danych walidacji dla tej trasy");
-                return noData;
-            }
-
-            Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
-
-            Map<String, Object> validationDetails = new HashMap<>();
-            validationDetails.put("routeId", routeId);
-            validationDetails.put("validationAvailable", true);
-            validationDetails.put("validationSource", routeData.getOrDefault("validation_source", "unknown"));
-            validationDetails.put("hasRestrictions", routeData.getOrDefault("hasRestrictions", false));
-            validationDetails.put("hasWarnings", routeData.getOrDefault("hasWarnings", false));
-            validationDetails.put("hasViolations", routeData.getOrDefault("hasViolations", false));
-            validationDetails.put("warnings", routeData.getOrDefault("warnings", Collections.emptyList()));
-            validationDetails.put("restrictions", routeData.getOrDefault("restrictions", Collections.emptyList()));
-            validationDetails.put("violations", routeData.getOrDefault("violations", Collections.emptyList()));
-            validationDetails.put("validationDetails", routeData.getOrDefault("validationDetails", Collections.emptyList()));
-            validationDetails.put("transportSetInfo", routeData.getOrDefault("transportSet", Collections.emptyMap()));
-            validationDetails.put("routeJustification", routeData.getOrDefault("routeJustification", Collections.emptyList()));
-            validationDetails.put("searchAttempts", routeData.getOrDefault("searchAttempts", null));
-            validationDetails.put("successfulAttempt", routeData.getOrDefault("successfulAttempt", null));
-            validationDetails.put("validationSummary", routeData.getOrDefault("validationSummary", Collections.emptyMap()));
-
-            return validationDetails;
-
-        } catch (Exception e) {
-            log.error("Błąd pobierania szczegółów walidacji: {}", e.getMessage());
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("routeId", routeId);
-            errorResponse.put("validationAvailable", false);
-            errorResponse.put("error", "Błąd podczas odczytu danych walidacji: " + e.getMessage());
-            return errorResponse;
-        }
-    }
-
+    /**
+     * ✅ POBIERZ ALTERNATYWNE TRASY
+     */
     public List<Map<String, Object>> getAlternativeRoutes(Long routeId) {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Route not found"));
 
-        return hereMapsService.getAlternativeRoutes(
-                route.getStartLatitude(), route.getStartLongitude(),
-                route.getEndLatitude(), route.getEndLongitude(),
-                route.getTransportSet()
-        );
+        List<Map<String, Object>> alternatives = new ArrayList<>();
+
+        try {
+            if (route.getRouteDataJson() != null && !route.getRouteDataJson().equals("{}")) {
+                Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
+
+                List<Map<String, Object>> attemptReports =
+                        (List<Map<String, Object>>) routeData.get("attemptReports");
+
+                if (attemptReports != null) {
+                    for (Map<String, Object> attempt : attemptReports) {
+                        if (Boolean.TRUE.equals(attempt.get("passable"))) {
+                            alternatives.add(attempt);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error parsing alternative routes", e);
+        }
+
+        return alternatives;
     }
 
+    /**
+     * ✅ STATYSTYKI WALIDACJI
+     */
     public Map<String, Object> getValidationStatistics() {
         List<Route> allRoutes = routeRepository.findAll();
-        long totalRoutes = allRoutes.size();
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("totalRoutes", allRoutes.size());
+
         long routesWithRestrictions = 0;
-        long routesWithWarnings = 0;
+        long routesWithPermits = 0;
         long routesWithViolations = 0;
-        long lightVehicleRoutes = 0;
+        int totalSearchAttempts = 0;
 
         for (Route route : allRoutes) {
             try {
                 if (route.getRouteDataJson() != null && !route.getRouteDataJson().equals("{}")) {
                     Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
-                    if (Boolean.TRUE.equals(routeData.get("hasRestrictions"))) routesWithRestrictions++;
-                    if (Boolean.TRUE.equals(routeData.get("hasWarnings"))) routesWithWarnings++;
-                    if (Boolean.TRUE.equals(routeData.get("hasViolations"))) routesWithViolations++;
-                    if (Boolean.TRUE.equals(routeData.get("lightVehicle"))) lightVehicleRoutes++;
+
+                    if (Boolean.TRUE.equals(routeData.get("hasRestrictions"))) {
+                        routesWithRestrictions++;
+                    }
+                    if (Boolean.TRUE.equals(routeData.get("requiresPermit"))) {
+                        routesWithPermits++;
+                    }
+                    if (Boolean.TRUE.equals(routeData.get("hasViolations"))) {
+                        routesWithViolations++;
+                    }
+
+                    Object attempts = routeData.get("searchAttempts");
+                    if (attempts instanceof Number) {
+                        totalSearchAttempts += ((Number) attempts).intValue();
+                    }
                 }
             } catch (Exception e) {
-                log.warn("Cannot parse route data for stats");
+                log.warn("Error parsing route statistics for route #{}", route.getId());
             }
         }
 
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("total_routes", totalRoutes);
-        stats.put("routes_with_restrictions", routesWithRestrictions);
-        stats.put("routes_with_warnings", routesWithWarnings);
-        stats.put("routes_with_violations", routesWithViolations);
-        stats.put("light_vehicle_routes", lightVehicleRoutes);
-        stats.put("heavy_vehicle_routes", totalRoutes - lightVehicleRoutes);
+        stats.put("routesWithRestrictions", routesWithRestrictions);
+        stats.put("routesWithPermits", routesWithPermits);
+        stats.put("routesWithViolations", routesWithViolations);
+        stats.put("totalSearchAttempts", totalSearchAttempts);
+        stats.put("averageSearchAttempts", allRoutes.isEmpty() ? 0 : (double) totalSearchAttempts / allRoutes.size());
 
         return stats;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // KLASA POMOCNICZA - RAPORT PRÓBY WALIDACJI
+    // ═══════════════════════════════════════════════════════════════════
+
     /**
-     * ✅ KLASA WEWNĘTRZNA - RAPORT PRÓBY
+     * ✅ RAPORT Z JEDNEJ PRÓBY WALIDACJI TRASY
      */
     @lombok.Data
-    static class RouteAttemptReport {
+    public static class RouteAttemptReport {
         private int attemptNumber;
-        private List<String> excludedBridges = new ArrayList<>();
-        private int totalInfrastructureChecked;
+        private boolean passable;
+        private boolean requiresPermit;
         private int blockedBridges;
+        private int totalInfrastructureChecked;
         private List<String> violations = new ArrayList<>();
         private List<String> restrictions = new ArrayList<>();
+        private List<String> permits = new ArrayList<>();
+        private List<String> excludedBridges = new ArrayList<>();
         private List<String> criticalBridges = new ArrayList<>();
-        private boolean passable;
-        private String error;
         private double successScore;
+        private String error;
 
         public boolean isFullyPassable() {
             return passable && violations.isEmpty() && blockedBridges == 0;

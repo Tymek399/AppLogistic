@@ -19,13 +19,16 @@ public class HereMapsService {
     private final ApiKeysConfig apiKeysConfig;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final MilitaryRoadPermissions militaryRoadPermissions;
 
     private static final double EXCLUSION_RADIUS_KM = 0.5;
 
-    public HereMapsService(ApiKeysConfig apiKeysConfig, RestTemplate restTemplate, ObjectMapper objectMapper) {
+    public HereMapsService(ApiKeysConfig apiKeysConfig, RestTemplate restTemplate,
+                           ObjectMapper objectMapper, MilitaryRoadPermissions militaryRoadPermissions) {
         this.apiKeysConfig = apiKeysConfig;
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+        this.militaryRoadPermissions = militaryRoadPermissions;
     }
 
     private String getApiKey() {
@@ -123,7 +126,7 @@ public class HereMapsService {
     }
 
     /**
-     * ✅ NOWA METODA: Buduje wynik zablokowanej trasy
+     * ✅ ZAKTUALIZOWANA METODA: Buduje wynik zablokowanej trasy
      */
     private Map<String, Object> buildBlockedResult(String reason) {
         Map<String, Object> result = new HashMap<>();
@@ -132,15 +135,36 @@ public class HereMapsService {
         result.put("violations", 1);
         result.put("restrictions", 0);
         result.put("warnings", 0);
-        result.put("notices", List.of(Map.of(
-                "code", "routeBlocked",
-                "title", "Trasa zablokowana",
-                "message", reason,
-                "severity", "critical"
-        )));
-        result.put("validationSource", "HERE_MAPS_BLOCKED");
-        result.put("routeBlocked", true);
-        result.put("blockReason", reason);
+
+        // ✅ SPRAWDŹ CZY TO WYMAGA TYLKO POZWOLENIA
+        boolean requiresPermitOnly = reason.contains("WYMAGA") &&
+                reason.contains("POZWOLENIA") &&
+                !reason.contains("BRAK");
+
+        if (requiresPermitOnly) {
+            result.put("notices", List.of(Map.of(
+                    "code", "requiresPermit",
+                    "title", "Wymaga pozwolenia",
+                    "message", reason,
+                    "severity", "warning"
+            )));
+            result.put("validationSource", "HERE_MAPS_PERMIT_REQUIRED");
+            result.put("routeBlocked", false); // ✅ NIE BLOKUJ!
+            result.put("requiresPermit", true);
+            log.info("⚠️ Trasa wymaga pozwolenia (nie blokujemy): {}", reason);
+        } else {
+            result.put("notices", List.of(Map.of(
+                    "code", "routeBlocked",
+                    "title", "Trasa zablokowana",
+                    "message", reason,
+                    "severity", "critical"
+            )));
+            result.put("validationSource", "HERE_MAPS_BLOCKED");
+            result.put("routeBlocked", true);
+            result.put("blockReason", reason);
+            log.error("❌ Trasa zablokowana: {}", reason);
+        }
+
         return result;
     }
 
@@ -175,9 +199,9 @@ public class HereMapsService {
             List<Map<String, Object>> sections = (List<Map<String, Object>>) route.get("sections");
             if (sections == null || sections.isEmpty()) return;
 
-            log.info("╔═════════════════════════════════════════════════════════");
+            log.info("╔═══════════════════════════════════════════════════════════");
             log.info("║ 📊 SZCZEGÓŁY TRASY Z HERE MAPS");
-            log.info("╠═════════════════════════════════════════════════════════");
+            log.info("╠═══════════════════════════════════════════════════════════");
 
             double totalDistance = 0;
             int totalDuration = 0;
@@ -221,7 +245,7 @@ public class HereMapsService {
             log.info("║    ├─ Całkowity czas:     {} h {} min",
                     totalDuration / 3600, (totalDuration % 3600) / 60);
             log.info("║    └─ Liczba sekcji:      {}", sections.size());
-            log.info("╚═════════════════════════════════════════════════════════");
+            log.info("╚═══════════════════════════════════════════════════════════");
 
         } catch (Exception e) {
             log.error("❌ Błąd logowania szczegółów HERE: {}", e.getMessage(), e);
@@ -240,9 +264,9 @@ public class HereMapsService {
                 List<Map<String, Object>> violations = (List<Map<String, Object>>) violationsObj;
 
                 if (violations != null && !violations.isEmpty()) {
-                    log.warn("╔═════════════════════════════════════════════════════════");
+                    log.warn("╔═══════════════════════════════════════════════════════════");
                     log.warn("║ ⚠️ WYKRYTE NARUSZENIA OGRANICZEŃ");
-                    log.warn("╠═════════════════════════════════════════════════════════");
+                    log.warn("╠═══════════════════════════════════════════════════════════");
 
                     for (int i = 0; i < violations.size(); i++) {
                         Map<String, Object> violation = violations.get(i);
@@ -256,7 +280,7 @@ public class HereMapsService {
                         log.warn("║    └─ Offset:   {} m", offset);
                     }
 
-                    log.warn("╚═════════════════════════════════════════════════════════");
+                    log.warn("╚═══════════════════════════════════════════════════════════");
                 } else {
                     log.info("✅ Brak wykrytych naruszeń ograniczeń");
                 }
@@ -269,9 +293,9 @@ public class HereMapsService {
     }
 
     private void compareTransportWithRoute(int weightKg, int heightCm, Map<String, Object> response) {
-        log.info("╔═════════════════════════════════════════════════════════");
+        log.info("╔═══════════════════════════════════════════════════════════");
         log.info("║ ⚖️ PORÓWNANIE: TRANSPORT vs TRASA");
-        log.info("╠═════════════════════════════════════════════════════════");
+        log.info("╠═══════════════════════════════════════════════════════════");
         log.info("║  🚛 Parametry transportu:");
         log.info("║    ├─ Waga całkowita:  {} t", String.format("%.1f", weightKg / 1000.0));
         log.info("║    ├─ Wysokość:        {} m", String.format("%.2f", heightCm / 100.0));
@@ -311,7 +335,7 @@ public class HereMapsService {
             log.error("║  ⚠️ Błąd sprawdzania violations");
         }
 
-        log.info("╚═════════════════════════════════════════════════════════");
+        log.info("╚═══════════════════════════════════════════════════════════");
     }
 
     private void analyzeNotices(List<Map<String, Object>> notices) {
@@ -331,9 +355,9 @@ public class HereMapsService {
             noticesBySeverity.merge(severity != null ? severity : "unknown", 1, Integer::sum);
         }
 
-        log.info("╔═════════════════════════════════════════════════════════");
+        log.info("╔═══════════════════════════════════════════════════════════");
         log.info("║ 📊 ANALIZA OSTRZEŻEŃ HERE MAPS");
-        log.info("╠═════════════════════════════════════════════════════════");
+        log.info("╠═══════════════════════════════════════════════════════════");
         log.info("║  Całkowita liczba: {}", notices.size());
         log.info("║");
         log.info("║  Według wagi:");
@@ -348,7 +372,7 @@ public class HereMapsService {
                 .forEach(entry ->
                         log.info("║    • {}: {}", entry.getKey(), entry.getValue())
                 );
-        log.info("╚═════════════════════════════════════════════════════════");
+        log.info("╚═══════════════════════════════════════════════════════════");
     }
 
     private String getSeverityIcon(String severity) {
