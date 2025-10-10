@@ -64,7 +64,7 @@
         .badge-clear { background: #d4edda; color: #155724; }
         .badge-warning { background: #fff3cd; color: #856404; }
         .badge-danger { background: #f8d7da; color: #721c24; }
-        .badge-permit { background: #cfe2ff; color: #084298; } /* ✅ NOWY */
+        .badge-permit { background: #cfe2ff; color: #084298; }
 
         .infrastructure-details {
             background: #f8f9fa;
@@ -74,7 +74,6 @@
             border-radius: 4px;
         }
 
-        /* ✅ NOWY STYL - lista pozwoleń */
         .permits-section {
             background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
             border: 2px solid #ffc107;
@@ -170,7 +169,6 @@
             margin-right: 10px;
         }
 
-        /* ✅ Styl dla mapy w modalu */
         .route-map-modal {
             position: fixed;
             top: 0;
@@ -214,6 +212,79 @@
         #route-preview-map {
             width: 100%;
             height: 100%;
+        }
+
+        /* Driver Location Modal */
+        .driver-location-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .driver-location-container {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 1200px;
+            height: 85vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        .driver-location-header {
+            padding: 20px;
+            border-bottom: 2px solid #dee2e6;
+            background: #f8f9fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .driver-location-stats {
+            display: flex;
+            gap: 30px;
+            font-size: 0.9em;
+        }
+
+        .driver-stat {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .driver-stat-label {
+            color: #6c757d;
+            font-size: 0.85em;
+        }
+
+        .driver-stat-value {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #0d6efd;
+        }
+
+        .driver-location-body {
+            flex: 1;
+            position: relative;
+        }
+
+        #driver-location-map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ✅ Dodatkowy styl dla przycisku mapy */
+        .btn-map-driver {
+            margin-left: 10px;
         }
     </style>
 </head>
@@ -491,6 +562,35 @@
     </div>
 </div>
 
+<!-- ✅ MODAL ŚLEDZENIA KIEROWCY NA ŻYWO -->
+<div id="driver-location-modal" class="driver-location-modal">
+    <div class="driver-location-container">
+        <div class="driver-location-header">
+            <div>
+                <h4 id="driver-location-title">📍 Lokalizacja kierowcy</h4>
+                <div class="driver-location-stats" id="driver-stats">
+                    <div class="driver-stat">
+                        <span class="driver-stat-label">Prędkość</span>
+                        <span class="driver-stat-value" id="driver-speed">-- km/h</span>
+                    </div>
+                    <div class="driver-stat">
+                        <span class="driver-stat-label">Ostatnia aktualizacja</span>
+                        <span class="driver-stat-value" id="driver-last-update">--</span>
+                    </div>
+                    <div class="driver-stat">
+                        <span class="driver-stat-label">Status</span>
+                        <span class="driver-stat-value" id="driver-status-live">🟢 Online</span>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-secondary" onclick="closeDriverLocationModal()">Zamknij</button>
+        </div>
+        <div class="driver-location-body">
+            <div id="driver-location-map"></div>
+        </div>
+    </div>
+</div>
+
 <script src="/js/operator.js"></script>
 <script>
     let operatorDashboard;
@@ -499,7 +599,13 @@
 
     let allCargo = [];
     let selectedTransportMode = 'trailer';
-    let routePreviewMap = null; // ✅ Mapa dla modalu
+    let routePreviewMap = null;
+
+    // ✅ Zmienne do śledzenia kierowcy
+    let driverLocationMap = null;
+    let driverLocationMarker = null;
+    let driverLocationInterval = null;
+    let currentTrackedDriver = null;
 
     if (!token) window.location.href = '/login.html';
 
@@ -599,14 +705,104 @@
         }
     }
 
+    // ✅ ULEPSZONA FUNKCJA - Dodawanie przycisków do kierowców
     window.addEventListener('load', () => {
         setTimeout(() => {
             if (operatorDashboard) {
-                console.log('Overriding displayRoutes function');
+                console.log('✅ Overriding displayRoutes and displayDrivers');
                 operatorDashboard.displayRoutes = displayRoutesWithAllButtons;
+
+                // Przechwyć oryginalną funkcję displayDrivers
+                const originalDisplayDrivers = operatorDashboard.displayDrivers.bind(operatorDashboard);
+                operatorDashboard.displayDrivers = function() {
+                    // Wywołaj oryginalną funkcję
+                    originalDisplayDrivers();
+
+                    // Po 100ms dodaj przyciski (daj czas na wyrenderowanie HTML)
+                    setTimeout(() => {
+                        addMapButtonsToDrivers();
+                    }, 100);
+                };
             }
         }, 500);
     });
+
+    // ✅ POPRAWIONA FUNKCJA - Dodaje przyciski mapy do wszystkich kierowców online
+    function addMapButtonsToDrivers() {
+        console.log('🔍 Szukam kierowców online...');
+        const driversList = document.getElementById('drivers-list');
+
+        if (!driversList) {
+            console.warn('⚠️ Nie znaleziono elementu drivers-list');
+            return;
+        }
+
+        // Znajdź wszystkie elementy kierowców
+        const driverItems = driversList.querySelectorAll('.driver-list-item');
+        console.log(`📋 Znaleziono ${driverItems.length} kierowców`);
+
+        driverItems.forEach((item, index) => {
+            console.log(`   Kierowca ${index + 1}:`, item.textContent.substring(0, 50));
+
+            // Sprawdź czy kierowca jest online (szukamy elementu z klasą driver-online lub tekstu "Online")
+            const isOnline = item.querySelector('.driver-online') ||
+                item.textContent.includes('Online') ||
+                item.innerHTML.includes('🟢');
+
+            if (!isOnline) {
+                console.log(`   ⚪ Kierowca offline, pomijam`);
+                return;
+            }
+
+            // Sprawdź czy przycisk już istnieje
+            if (item.querySelector('.btn-map-driver')) {
+                console.log(`   ✅ Przycisk już istnieje`);
+                return;
+            }
+
+            // Pobierz username kierowcy
+            let driverUsername = null;
+
+            // Próba 1: Szukaj w <strong>
+            const strongElement = item.querySelector('strong');
+            if (strongElement) {
+                driverUsername = strongElement.textContent.trim();
+            }
+
+            // Próba 2: Szukaj w całym tekście
+            if (!driverUsername) {
+                const textMatch = item.textContent.match(/([A-Z][a-z]+\s[A-Z][a-z]+)/);
+                if (textMatch) {
+                    driverUsername = textMatch[1];
+                }
+            }
+
+            // Próba 3: Szukaj w atrybucie data
+            if (!driverUsername && item.dataset.driver) {
+                driverUsername = item.dataset.driver;
+            }
+
+            if (!driverUsername) {
+                console.warn(`   ⚠️ Nie można znaleźć username kierowcy`);
+                return;
+            }
+
+            console.log(`   🟢 Dodaję przycisk dla: ${driverUsername}`);
+
+            // Utwórz przycisk
+            const mapButton = document.createElement('button');
+            mapButton.className = 'btn btn-success btn-sm btn-map-driver';
+            mapButton.innerHTML = '🗺️ Zobacz na mapie';
+            mapButton.onclick = (e) => {
+                e.stopPropagation();
+                showDriverLocation(driverUsername);
+            };
+
+            // Dodaj przycisk do elementu kierowcy
+            item.appendChild(mapButton);
+            console.log(`   ✅ Dodano przycisk!`);
+        });
+    }
 
     async function displayRoutesWithAllButtons() {
         const container = document.getElementById('routes-list');
@@ -663,7 +859,6 @@
             if (validation.hasViolations) {
                 html += '<span class="validation-badge badge-danger">🔄 Użyto trasy alternatywnej</span>';
             }
-            // ✅ NOWY BADGE - pozwolenia
             if (validation.permits && validation.permits.length > 0) {
                 html += `<span class="validation-badge badge-permit">📋 Wymaga ${validation.permits.length} pozwoleń</span>`;
             }
@@ -729,7 +924,6 @@
             `;
         }
 
-        // ✅ NOWA SEKCJA - WYŚWIETLANIE POZWOLEŃ
         if (validation && validation.permits && validation.permits.length > 0) {
             html += `
                 <div class="permits-section">
@@ -740,7 +934,6 @@
             `;
 
             validation.permits.forEach((permit, index) => {
-                // Format: "Nazwa obiektu (Miasto) - droga: Droga: opis"
                 const permitHtml = parsePermitString(permit, index + 1);
                 html += permitHtml;
             });
@@ -794,22 +987,16 @@
         return html;
     }
 
-    /**
-     * ✅ NOWA FUNKCJA - parsowanie stringa pozwolenia
-     */
     function parsePermitString(permitString, index) {
-        // Format: "Nazwa (Miasto) - droga: X: Opis"
         let html = `<div class="permit-item">`;
         html += `<div style="display:flex; align-items:center; margin-bottom:8px;">`;
         html += `<span style="background:#ff9800;color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;margin-right:12px;">${index}</span>`;
 
-        // Wyciągnij nazwę, miasto, drogę
         let location = '';
         let city = '';
         let road = '';
         let description = permitString;
 
-        // Szukaj "(Miasto)"
         const cityMatch = permitString.match(/\(([^)]+)\)/);
         if (cityMatch) {
             city = cityMatch[1];
@@ -818,13 +1005,11 @@
             description = permitString.substring(permitString.indexOf(')') + 1).trim();
         }
 
-        // Szukaj "- droga: X:"
         const roadMatch = description.match(/- droga: ([^:]+):/);
         if (roadMatch) {
             road = roadMatch[1].trim();
             description = description.substring(description.lastIndexOf(':') + 1).trim();
         } else if (description.includes(':')) {
-            // Fallback - pierwsze : to koniec nazwy
             const colonIndex = description.indexOf(':');
             if (!location) {
                 location = description.substring(0, colonIndex).trim();
@@ -893,7 +1078,6 @@
             html += '</ul></div>';
         }
 
-        // ✅ POZWOLENIA W PEŁNEJ WALIDACJI
         if (validation.permits && validation.permits.length > 0) {
             html += '<div style="background:#fff3cd;padding:20px;border-radius:8px;margin-top:20px;border:2px solid #ffc107;">';
             html += `<h5 style="color:#856404;"><strong>⚠️ WYMAGANE POZWOLENIA (${validation.permits.length}):</strong></h5>`;
@@ -983,9 +1167,6 @@
         document.body.appendChild(modal);
     }
 
-    /**
-     * ✅ NOWA FUNKCJA - Wyświetl trasę na mapie
-     */
     async function showRouteOnMap(routeId) {
         try {
             const response = await fetch(`/api/routes/${routeId}/navigation-data`);
@@ -996,7 +1177,6 @@
 
             modal.style.display = 'flex';
 
-            // Inicjalizuj mapę jeśli jeszcze nie istnieje
             if (!routePreviewMap) {
                 routePreviewMap = new google.maps.Map(document.getElementById('route-preview-map'), {
                     zoom: 10,
@@ -1004,13 +1184,11 @@
                 });
             }
 
-            // Wyczyść poprzednie markery/polyline
             routePreviewMap = new google.maps.Map(document.getElementById('route-preview-map'), {
                 zoom: 10,
                 center: { lat: data.startLat, lng: data.startLng }
             });
 
-            // Marker startowy
             new google.maps.Marker({
                 position: { lat: data.startLat, lng: data.startLng },
                 map: routePreviewMap,
@@ -1025,7 +1203,6 @@
                 }
             });
 
-            // Marker końcowy
             new google.maps.Marker({
                 position: { lat: data.endLat, lng: data.endLng },
                 map: routePreviewMap,
@@ -1040,18 +1217,15 @@
                 }
             });
 
-            // Rysuj trasę
             let coordinates = [];
             let routeColor = '#4285F4';
             let routeLabel = 'Google Maps';
 
             if (data.herePolyline) {
-                // HERE Maps polyline
                 coordinates = decodeHereFlexiblePolyline(data.herePolyline);
                 routeColor = '#34a853';
                 routeLabel = 'HERE Maps (Zwalidowana)';
             } else if (data.googleMapsRoutes && data.googleMapsRoutes.length > 0) {
-                // Google Maps polyline
                 const route = data.googleMapsRoutes[0];
                 if (route.overview_polyline?.points) {
                     coordinates = decodeGooglePolyline(route.overview_polyline.points);
@@ -1068,7 +1242,6 @@
                     map: routePreviewMap
                 });
 
-                // Dopasuj mapę do trasy
                 const bounds = new google.maps.LatLngBounds();
                 coordinates.forEach(coord => bounds.extend(coord));
                 routePreviewMap.fitBounds(bounds);
@@ -1087,8 +1260,138 @@
     }
 
     /**
-     * ✅ Dekodowanie HERE Flexible Polyline
+     * ✅ FUNKCJA ŚLEDZENIA KIEROWCY NA ŻYWO
      */
+    async function showDriverLocation(driverUsername) {
+        console.log(`🗺️ Otwieram mapę dla kierowcy: ${driverUsername}`);
+        currentTrackedDriver = driverUsername;
+
+        const modal = document.getElementById('driver-location-modal');
+        document.getElementById('driver-location-title').textContent = `📍 Lokalizacja kierowcy: ${driverUsername}`;
+
+        modal.style.display = 'flex';
+
+        if (!driverLocationMap) {
+            driverLocationMap = new google.maps.Map(document.getElementById('driver-location-map'), {
+                zoom: 16,
+                center: { lat: 52.2297, lng: 21.0122 },
+                mapTypeControl: true,
+                streetViewControl: true,
+                fullscreenControl: true,
+                zoomControl: true
+            });
+        }
+
+        await updateDriverLocation(driverUsername);
+
+        if (driverLocationInterval) clearInterval(driverLocationInterval);
+        driverLocationInterval = setInterval(() => {
+            updateDriverLocation(driverUsername);
+        }, 3000);
+    }
+
+    async function updateDriverLocation(driverUsername) {
+        try {
+            const response = await fetch(`/api/tracking/driver/${driverUsername}/status`);
+            if (!response.ok) {
+                throw new Error('Nie udało się pobrać lokalizacji');
+            }
+
+            const driverInfo = await response.json();
+
+            if (!driverInfo.isOnline || !driverInfo.latitude || !driverInfo.longitude) {
+                document.getElementById('driver-status-live').textContent = '⚪ Offline';
+                document.getElementById('driver-status-live').style.color = '#6c757d';
+                return;
+            }
+
+            const position = {
+                lat: driverInfo.latitude,
+                lng: driverInfo.longitude
+            };
+
+            document.getElementById('driver-speed').textContent =
+                driverInfo.speedKmh ? `${Math.round(driverInfo.speedKmh)} km/h` : '0 km/h';
+
+            if (driverInfo.lastUpdate) {
+                const lastUpdate = new Date(driverInfo.lastUpdate);
+                const now = new Date();
+                const diffSeconds = Math.floor((now - lastUpdate) / 1000);
+
+                if (diffSeconds < 10) {
+                    document.getElementById('driver-last-update').textContent = 'teraz';
+                } else if (diffSeconds < 60) {
+                    document.getElementById('driver-last-update').textContent = `${diffSeconds}s temu`;
+                } else {
+                    document.getElementById('driver-last-update').textContent =
+                        `${Math.floor(diffSeconds / 60)}m temu`;
+                }
+            }
+
+            document.getElementById('driver-status-live').textContent = '🟢 Online';
+            document.getElementById('driver-status-live').style.color = '#28a745';
+
+            if (driverLocationMarker) {
+                driverLocationMarker.setMap(null);
+            }
+
+            driverLocationMarker = new google.maps.Marker({
+                position: position,
+                map: driverLocationMap,
+                title: `Kierowca: ${driverUsername}`,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 12,
+                    fillColor: '#4285F4',
+                    fillOpacity: 1,
+                    strokeColor: 'white',
+                    strokeWeight: 3
+                },
+                animation: google.maps.Animation.DROP
+            });
+
+            const infoWindow = new google.maps.InfoWindow({
+                content: `
+                    <div style="padding: 10px;">
+                        <h6 style="margin: 0 0 10px 0;">${driverUsername}</h6>
+                        <p style="margin: 5px 0;"><strong>Trasa:</strong> ${driverInfo.routeDescription || 'Brak'}</p>
+                        <p style="margin: 5px 0;"><strong>Prędkość:</strong> ${Math.round(driverInfo.speedKmh || 0)} km/h</p>
+                        <p style="margin: 5px 0;"><strong>Status:</strong> <span style="color: #28a745;">🟢 Online</span></p>
+                    </div>
+                `
+            });
+
+            driverLocationMarker.addListener('click', () => {
+                infoWindow.open(driverLocationMap, driverLocationMarker);
+            });
+
+            driverLocationMap.panTo(position);
+
+            console.log(`✅ Zaktualizowano pozycję kierowcy ${driverUsername}:`, position);
+
+        } catch (error) {
+            console.error('Błąd aktualizacji lokalizacji kierowcy:', error);
+            document.getElementById('driver-status-live').textContent = '❌ Błąd';
+            document.getElementById('driver-status-live').style.color = '#dc3545';
+        }
+    }
+
+    function closeDriverLocationModal() {
+        document.getElementById('driver-location-modal').style.display = 'none';
+
+        if (driverLocationInterval) {
+            clearInterval(driverLocationInterval);
+            driverLocationInterval = null;
+        }
+
+        currentTrackedDriver = null;
+
+        if (driverLocationMarker) {
+            driverLocationMarker.setMap(null);
+            driverLocationMarker = null;
+        }
+    }
+
     function decodeHereFlexiblePolyline(encoded) {
         const ENCODING_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
@@ -1138,9 +1441,6 @@
         return coordinates;
     }
 
-    /**
-     * ✅ Dekodowanie Google Polyline
-     */
     function decodeGooglePolyline(encoded) {
         const coordinates = [];
         let index = 0;
@@ -1395,10 +1695,22 @@
     function logout() {
         if (confirm('Czy na pewno chcesz się wylogować?')) {
             if (operatorDashboard?.destroy) operatorDashboard.destroy();
+
+            if (driverLocationInterval) {
+                clearInterval(driverLocationInterval);
+                driverLocationInterval = null;
+            }
+
             localStorage.clear();
             window.location.href = '/login.html';
         }
     }
+
+    window.addEventListener('beforeunload', () => {
+        if (driverLocationInterval) {
+            clearInterval(driverLocationInterval);
+        }
+    });
 
     document.addEventListener('DOMContentLoaded', initializeSystem);
 </script>
