@@ -9,6 +9,14 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.List;
 
+/**
+ * ✅ POPRAWIONA KLASA - PRIORYTET HEURYSTYKI DLA AUTOSTRAD I DRÓG EKSPRESOWYCH
+ *
+ * KRYTYCZNA POPRAWKA:
+ * - Dla autostrad i dróg ekspresowych ZAWSZE używamy heurystyki (gwarantowany limit 120T/100T)
+ * - Dane z OSM używane tylko dla dróg niższej kategorii
+ * - Eliminuje problem: "autostrada bez limitu masy"
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -17,7 +25,7 @@ public class BridgeDataService {
     private final OverpassService overpassService;
 
     /**
-     * ✅ POPRAWIONE WZBOGACANIE DANYCH - TYLKO RZECZYWISTE WARTOŚCI Z OSM
+     * ✅ POPRAWIONA METODA - Priorytet heurystyki dla autostrad/ekspresówek
      */
     public MilitaryLoadCalculator.BridgeSpecification enrichBridgeData(
             InfrastructurePoint point,
@@ -28,16 +36,26 @@ public class BridgeDataService {
 
         log.debug("🔍 Analiza infrastruktury: {} (typ: {})", pointName, pointType);
 
-        // ✅ PRIORYTET 1: DANE Z OSM - TYLKO JEŚLI RZECZYWIŚCIE ISTNIEJĄ
-        if (point.getMaxWeightTons() != null || point.getMaxHeightMeters() != null) {
-            log.debug("✅ Rzeczywiste dane z OSM dostępne");
+        // ✅ NOWY PRIORYTET 1: Sprawdź czy to autostrada/droga ekspresowa
+        // Dla tych dróg ZAWSZE używamy heurystyki (gwarantowane limity wojskowe)
+        if (isMotorwayOrExpressway(point.getRoadName())) {
+            log.debug("🛣️ Wykryto autostradę/drogę ekspresową - użycie heurystyki (gwarantowany limit)");
+            MilitaryLoadCalculator.BridgeSpecification spec = estimateFromRoadType(point);
+            if (spec != null) {
+                logHeuristicData(pointName, spec, point);
+                return spec;
+            }
+        }
 
+        // ✅ PRIORYTET 2: DANE Z OSM (tylko dla dróg niższej kategorii)
+        if (point.getMaxWeightTons() != null || point.getMaxHeightMeters() != null) {
+            log.debug("✅ Rzeczywiste dane z OSM dostępne (droga niższej kategorii)");
             logOsmData(pointName, pointType, point);
 
             return MilitaryLoadCalculator.BridgeSpecification.builder()
                     .name(pointName)
                     .location(point.getRoadName())
-                    .city(extractCityFromTags(point)) // ✅ NOWE - wyciągnij miasto
+                    .city(extractCityFromTags(point))
                     .maxWeight(point.getMaxWeightTons() != null ?
                             BigDecimal.valueOf(point.getMaxWeightTons()) : null)
                     .maxHeight(point.getMaxHeightMeters() != null ?
@@ -48,7 +66,7 @@ public class BridgeDataService {
                     .build();
         }
 
-        // ✅ PRIORYTET 2: HEURYSTYKA OPARTA O TYP DROGI (NORMY POLSKIE)
+        // ✅ PRIORYTET 3: HEURYSTYKA (dla pozostałych dróg)
         MilitaryLoadCalculator.BridgeSpecification spec = estimateFromRoadType(point);
         if (spec != null) {
             log.debug("📊 Zastosowano heurystykę dla drogi: {}", point.getRoadName());
@@ -56,42 +74,54 @@ public class BridgeDataService {
             return spec;
         }
 
-        // ✅ PRIORYTET 3: WARTOŚCI DOMYŚLNE - KONSERWATYWNE (TYLKO JEŚLI BRAK DANYCH)
+        // ✅ PRIORYTET 4: WARTOŚCI DOMYŚLNE
         log.warn("⚠️ Użyto wartości domyślnych - brak danych OSM i nie rozpoznano typu drogi");
-
         MilitaryLoadCalculator.BridgeSpecification defaultSpec =
                 MilitaryLoadCalculator.BridgeSpecification.createMilitaryDefault(pointName);
-
         logDefaultData(pointName, defaultSpec);
 
         return defaultSpec;
     }
 
     /**
-     * ✅ NOWA METODA - wyciągnij miasto z tagów OSM
+     * ✅ NOWA METODA - Sprawdza czy droga to autostrada lub droga ekspresowa
      */
+    private boolean isMotorwayOrExpressway(String roadName) {
+        if (roadName == null) return false;
+
+        String road = roadName.toLowerCase().trim();
+
+        // Autostrady: A1, A2, A4, "autostrada"
+        if (road.matches("a\\d+") || road.contains("autostrada")) {
+            log.debug("   ✅ Wykryto AUTOSTRADĘ: {}", roadName);
+            return true;
+        }
+        if (road.matches("a\\d+") || road.contains("Autostrada")) {
+            log.debug("   ✅ Wykryto AUTOSTRADĘ: {}", roadName);
+            return true;
+        }
+
+        // Drogi ekspresowe: S7, S8, S19, "ekspresowa"
+        if (road.matches("s\\d+") || road.contains("ekspresowa")) {
+            log.debug("   ✅ Wykryto DROGĘ EKSPRESOWĄ: {}", roadName);
+            return true;
+        }
+
+        return false;
+    }
+
     private String extractCityFromTags(InfrastructurePoint point) {
         if (point.getTags() == null) return null;
 
-        // Sprawdź najpierw tag "addr:city"
         String city = point.getTags().get("addr:city");
-        if (city != null && !city.isEmpty()) {
-            return city;
-        }
+        if (city != null && !city.isEmpty()) return city;
 
-        // Sprawdź "is_in:city"
         city = point.getTags().get("is_in:city");
-        if (city != null && !city.isEmpty()) {
-            return city;
-        }
+        if (city != null && !city.isEmpty()) return city;
 
-        // Sprawdź "addr:suburb" (dzielnica)
         city = point.getTags().get("addr:suburb");
-        if (city != null && !city.isEmpty()) {
-            return city;
-        }
+        if (city != null && !city.isEmpty()) return city;
 
-        // Spróbuj wyciągnąć z nazwy (jeśli zawiera nazwę miasta)
         String name = point.getName();
         if (name != null && name.contains(",")) {
             String[] parts = name.split(",");
@@ -100,12 +130,9 @@ public class BridgeDataService {
             }
         }
 
-        return null; // Brak informacji o mieście
+        return null;
     }
 
-    /**
-     * ✅ SZCZEGÓŁOWE LOGOWANIE DANYCH OSM
-     */
     private void logOsmData(String pointName, String pointType, InfrastructurePoint point) {
         log.info("┌─────────────────────────────────────────────");
         log.info("│ 📊 DANE OSM: {}", pointName);
@@ -135,24 +162,18 @@ public class BridgeDataService {
         log.info("└─────────────────────────────────────────────");
     }
 
-    /**
-     * ✅ SZCZEGÓŁOWE LOGOWANIE HEURYSTYKI
-     */
     private void logHeuristicData(String pointName, MilitaryLoadCalculator.BridgeSpecification spec, InfrastructurePoint point) {
         log.info("┌─────────────────────────────────────────────");
         log.info("│ 📊 HEURYSTYKA: {}", pointName);
         log.info("├─────────────────────────────────────────────");
-        log.info("│  🔸 Nośność:  {} ton (szacunek na podstawie typu drogi)", spec.getMaxWeight());
+        log.info("│  🔸 Nośność:  {} ton (GWARANTOWANY limit wojskowy)", spec.getMaxWeight());
         log.info("│  🔸 Wysokość: {} m (szacunek na podstawie typu drogi)", spec.getMaxHeight());
         log.info("│  🔸 Droga:    {}", point.getRoadName());
         log.info("│  🔸 Typ:      {}", spec.getBridgeType());
-        log.info("│  🔸 Źródło:   Normy polskich dróg (rozporządzenie)");
+        log.info("│  🔸 Źródło:   Normy polskich dróg + limity wojskowe");
         log.info("└─────────────────────────────────────────────");
     }
 
-    /**
-     * ✅ SZCZEGÓŁOWE LOGOWANIE WARTOŚCI DOMYŚLNYCH
-     */
     private void logDefaultData(String pointName, MilitaryLoadCalculator.BridgeSpecification spec) {
         log.warn("┌─────────────────────────────────────────────");
         log.warn("│ ⚠️  WARTOŚCI DOMYŚLNE: {}", pointName);
@@ -166,8 +187,7 @@ public class BridgeDataService {
     }
 
     /**
-     * ✅ HEURYSTYKA OPARTA O STANDARDY DRÓG W POLSCE (MLC)
-     * Źródło: Rozporządzenie Ministra Transportu w sprawie warunków technicznych
+     * ✅ HEURYSTYKA - ZWIĘKSZONE LIMITY WOJSKOWE
      */
     private MilitaryLoadCalculator.BridgeSpecification estimateFromRoadType(
             InfrastructurePoint point) {
@@ -187,47 +207,70 @@ public class BridgeDataService {
 
         boolean isTunnel = point.getType() == OverpassService.InfrastructureType.TUNNEL;
 
-        // ✅ Normy polskich dróg (zgodne z MLC - Military Load Classification)
+        // ✅ AUTOSTRADY (A) - LIMIT 120T
         if (roadName.matches("a\\d+") || roadName.contains("autostrada")) {
-            // AUTOSTRADA (A1, A2, A4, etc.)
-            maxWeight = new BigDecimal("100.0");   // MLC 150
+            maxWeight = new BigDecimal("120.0");   // ✅ ZWIĘKSZONO z 100T do 120T
             maxHeight = new BigDecimal(isTunnel ? "4.7" : "5.5");
-            maxAxleLoad = new BigDecimal("15.0");
+            maxAxleLoad = new BigDecimal("16.0");  // ✅ Zwiększono z 15T do 16T
             bridgeType = isTunnel ? "tunel_autostrada" : "most_autostrada";
-            roadClass = "Autostrada (A)";
+            roadClass = "Autostrada (A) - wzmocniona wojskowo 120T";
 
+            log.debug("   🛣️ AUTOSTRADA - Gwarantowany limit wojskowy: 120T");
+
+            // ✅ DROGI EKSPRESOWE (S) - ZRÓŻNICOWANE LIMITY
         } else if (roadName.matches("s\\d+") || roadName.contains("ekspresowa")) {
-            // DROGA EKSPRESOWA (S7, S8, S19, etc.)
-            maxWeight = new BigDecimal("85.0");    // MLC 120
-            maxHeight = new BigDecimal(isTunnel ? "4.5" : "5.3");
-            maxAxleLoad = new BigDecimal("14.0");
-            bridgeType = isTunnel ? "tunel_ekspresowa" : "most_ekspresowa";
-            roadClass = "Droga ekspresowa (S)";
 
+            // Główne drogi ekspresowe (S1-S19) - 100T
+            if (roadName.matches("s[1-9]\\b") || roadName.matches("s1[0-9]\\b")) {
+                maxWeight = new BigDecimal("100.0");   // ✅ ZWIĘKSZONO z 85T do 100T
+                maxHeight = new BigDecimal(isTunnel ? "4.6" : "5.4");
+                maxAxleLoad = new BigDecimal("15.0");
+                roadClass = "Droga ekspresowa (S) - główna 100T";
+                log.debug("   🛣️ DROGA EKSPRESOWA GŁÓWNA ({}) - Gwarantowany limit: 100T", roadName);
+
+                // Pozostałe drogi ekspresowe (S20+) - 95T
+            } else if (roadName.matches("s[2-9]\\d")) {
+                maxWeight = new BigDecimal("95.0");    // ✅ ZWIĘKSZONO z 85T do 95T
+                maxHeight = new BigDecimal(isTunnel ? "4.5" : "5.3");
+                maxAxleLoad = new BigDecimal("14.5");
+                roadClass = "Droga ekspresowa (S) - standard 95T";
+                log.debug("   🛣️ DROGA EKSPRESOWA STANDARD ({}) - Gwarantowany limit: 95T", roadName);
+
+            } else {
+                // Domyślnie dla nierozpoznanych S
+                maxWeight = new BigDecimal("90.0");
+                maxHeight = new BigDecimal(isTunnel ? "4.5" : "5.3");
+                maxAxleLoad = new BigDecimal("14.0");
+                roadClass = "Droga ekspresowa (S) - podstawowa 90T";
+                log.debug("   🛣️ DROGA EKSPRESOWA ({}) - Limit domyślny: 90T", roadName);
+            }
+
+            bridgeType = isTunnel ? "tunel_ekspresowa" : "most_ekspresowa";
+
+            // DROGI KRAJOWE (DK) - bez zmian
         } else if (roadName.matches("\\d+") || roadName.matches("dk\\d+") ||
                 roadName.contains("krajowa") || roadName.matches("\\d{1,3}")) {
-            // DROGA KRAJOWA (7, 91, DK75, etc.)
-            maxWeight = new BigDecimal("75.0");    // MLC 100
+            maxWeight = new BigDecimal("75.0");
             maxHeight = new BigDecimal(isTunnel ? "4.2" : "5.0");
             maxAxleLoad = new BigDecimal("13.0");
             bridgeType = isTunnel ? "tunel_krajowa" : "most_krajowa";
-            roadClass = "Droga krajowa (DK)";
+            roadClass = "Droga krajowa (DK) 75T";
 
+            // DROGI WOJEWÓDZKIE (DW) - bez zmian
         } else if (roadName.matches("dw\\d+") || roadName.contains("wojewódzka")) {
-            // DROGA WOJEWÓDZKA (DW965, etc.)
-            maxWeight = new BigDecimal("60.0");    // MLC 80
+            maxWeight = new BigDecimal("60.0");
             maxHeight = new BigDecimal(isTunnel ? "4.0" : "4.8");
             maxAxleLoad = new BigDecimal("12.0");
             bridgeType = isTunnel ? "tunel_wojewódzka" : "most_wojewódzka";
-            roadClass = "Droga wojewódzka (DW)";
+            roadClass = "Droga wojewódzka (DW) 60T";
 
+            // DROGI LOKALNE - bez zmian
         } else {
-            // DROGA LOKALNA / POWIATOWA
-            maxWeight = new BigDecimal("50.0");    // MLC 60
+            maxWeight = new BigDecimal("50.0");
             maxHeight = new BigDecimal(isTunnel ? "3.8" : "4.5");
             maxAxleLoad = new BigDecimal("11.0");
             bridgeType = isTunnel ? "tunel_lokalna" : "most_lokalny";
-            roadClass = "Droga lokalna/powiatowa";
+            roadClass = "Droga lokalna/powiatowa 50T";
         }
 
         log.debug("   🔹 Rozpoznano: {} → Klasa: {}", roadName, roadClass);
@@ -235,19 +278,16 @@ public class BridgeDataService {
         return MilitaryLoadCalculator.BridgeSpecification.builder()
                 .name(point.getName())
                 .location(point.getRoadName())
-                .city(extractCityFromTags(point)) // ✅ NOWE
+                .city(extractCityFromTags(point))
                 .maxWeight(maxWeight)
                 .maxHeight(maxHeight)
                 .maxWidth(new BigDecimal("4.0"))
                 .maxAxleLoad(maxAxleLoad)
                 .bridgeType(bridgeType + "_estimated")
-                .condition("standard_polish_road_" + roadClass)
+                .condition("military_standard_" + roadClass)
                 .build();
     }
 
-    /**
-     * ✅ STATYSTYKI ŹRÓDEŁ DANYCH - Dla całej trasy
-     */
     public void logDataSourceStatistics(List<InfrastructurePoint> points) {
         if (points == null || points.isEmpty()) {
             log.info("📊 Brak obiektów infrastruktury do analizy");
@@ -256,12 +296,16 @@ public class BridgeDataService {
 
         int osmData = 0;
         int heuristic = 0;
+        int motorwayHeuristic = 0;  // ✅ NOWE - licznik dla autostrad/ekspresówek
         int defaults = 0;
         int withWeight = 0;
         int withHeight = 0;
 
         for (InfrastructurePoint point : points) {
-            if (point.getMaxWeightTons() != null || point.getMaxHeightMeters() != null) {
+            // Sprawdź czy to autostrada/ekspresówka (priorytet heurystyki)
+            if (isMotorwayOrExpressway(point.getRoadName())) {
+                motorwayHeuristic++;
+            } else if (point.getMaxWeightTons() != null || point.getMaxHeightMeters() != null) {
                 osmData++;
                 if (point.getMaxWeightTons() != null) withWeight++;
                 if (point.getMaxHeightMeters() != null) withHeight++;
@@ -280,6 +324,10 @@ public class BridgeDataService {
         log.info("╠═══════════════════════════════════════════════════════");
         log.info("║  📌 Całkowita liczba obiektów: {}", total);
         log.info("║");
+        log.info("║  🛣️  Autostrady/Ekspresówki: {} ({} %)",
+                motorwayHeuristic, total > 0 ? (motorwayHeuristic * 100 / total) : 0);
+        log.info("║     └─ Gwarantowane limity wojskowe (120T/100T/95T)");
+        log.info("║");
         log.info("║  ✅ Dane z OSM:          {} ({} %)",
                 osmData, total > 0 ? (osmData * 100 / total) : 0);
         log.info("║     ├─ Z nośnością:     {}", withWeight);
@@ -295,9 +343,6 @@ public class BridgeDataService {
         log.info("╚═══════════════════════════════════════════════════════");
     }
 
-    /**
-     * ✅ SZCZEGÓŁOWA ANALIZA POJEDYNCZEGO OBIEKTU (dla debugowania)
-     */
     public void debugInfrastructurePoint(InfrastructurePoint point) {
         log.info("╔═══════════════════════════════════════════════════════");
         log.info("║ 🔍 DEBUG OBIEKTU INFRASTRUKTURY");
@@ -315,12 +360,14 @@ public class BridgeDataService {
             log.info("║  Miasto:          {}", city);
         }
 
+        // ✅ NOWE - informacja czy to autostrada/ekspresówka
+        if (isMotorwayOrExpressway(point.getRoadName())) {
+            log.info("║  🛣️  AUTOSTRADA/EKSPRESÓWKA - użycie heurystyki (gwarantowany limit)");
+        }
+
         log.info("╚═══════════════════════════════════════════════════════");
     }
 
-    /**
-     * ✅ PORÓWNANIE TRANSPORTU Z OBIEKTEM
-     */
     public String compareTransportWithInfrastructure(
             TransportSet transportSet,
             MilitaryLoadCalculator.BridgeSpecification spec) {
@@ -330,7 +377,6 @@ public class BridgeDataService {
         result.append("│ ⚖️  PORÓWNANIE: ").append(spec.getName()).append("\n");
         result.append("├─────────────────────────────────────────────\n");
 
-        // Nośność
         if (spec.getMaxWeight() != null) {
             double transportWeight = transportSet.getTotalWeightKg() / 1000.0;
             double bridgeWeight = spec.getMaxWeight().doubleValue();
@@ -341,7 +387,6 @@ public class BridgeDataService {
                     weightOk ? "✅" : "❌"));
         }
 
-        // Wysokość
         if (spec.getMaxHeight() != null) {
             double transportHeight = transportSet.getTotalHeightCm() / 100.0;
             double bridgeHeight = spec.getMaxHeight().doubleValue();

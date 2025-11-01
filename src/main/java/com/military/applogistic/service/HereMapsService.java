@@ -12,6 +12,15 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * ✅ ZAKTUALIZOWANA KLASA - PREFEROWANIE AUTOSTRAD DLA POJAZDÓW >60T
+ *
+ * ZMIANY:
+ * 1. Dodano stałą HEAVY_VEHICLE_THRESHOLD_KG = 60000 (60T)
+ * 2. Metoda buildRouteRequest() - routing zależny od masy pojazdu
+ * 3. Metoda validateRoute() - automatyczne wykrywanie ciężkich pojazdów
+ * 4. Rozszerzone logowanie z informacją o preferencji autostrad
+ */
 @Slf4j
 @Service
 public class HereMapsService {
@@ -22,6 +31,8 @@ public class HereMapsService {
     private final MilitaryRoadPermissions militaryRoadPermissions;
 
     private static final double EXCLUSION_RADIUS_KM = 0.5;
+    // ✅ NOWA STAŁA - próg dla preferowania autostrad
+    private static final double HEAVY_VEHICLE_THRESHOLD_KG = 60000; // 60T
 
     public HereMapsService(ApiKeysConfig apiKeysConfig, RestTemplate restTemplate,
                            ObjectMapper objectMapper, MilitaryRoadPermissions militaryRoadPermissions) {
@@ -36,7 +47,7 @@ public class HereMapsService {
     }
 
     /**
-     * ✅ GŁÓWNA METODA WALIDACJI - Z TWARDYM BLOKOWANIEM
+     * ✅ ZAKTUALIZOWANA METODA - Z PREFERENCJĄ AUTOSTRAD DLA CIĘŻKICH POJAZDÓW
      */
     public Map<String, Object> validateRoute(
             double startLat, double startLng,
@@ -46,15 +57,24 @@ public class HereMapsService {
 
         log.info("🔍 Walidacja trasy: waga={}kg, wysokość={}cm", weightKg, heightCm);
 
+        // ✅ NOWE - Sprawdź czy pojazd powinien preferować autostrady
+        boolean preferMotorway = weightKg > HEAVY_VEHICLE_THRESHOLD_KG;
+        if (preferMotorway) {
+            log.info("🛣️ POJAZD CIĘŻKI (>60T) - PREFEROWANA TRASA AUTOSTRADĄ");
+        }
+
         if (excludedNames != null && !excludedNames.isEmpty()) {
             log.info("🚫 Wykluczone obiekty ({}): {}", excludedNames.size(),
                     excludedNames.size() > 10 ? excludedNames.size() + " obiektów" : excludedNames);
         }
 
-        UriComponentsBuilder builder = buildRouteRequest(startLat, startLng, endLat, endLng, weightKg, heightCm);
+        // ✅ ZMIENIONE - przekazujemy informację o preferencji autostrad
+        UriComponentsBuilder builder = buildRouteRequest(
+                startLat, startLng, endLat, endLng, weightKg, heightCm, preferMotorway);
         String url = builder.toUriString();
 
-        log.info("📡 HERE Maps API call: weight={}kg, height={}m", weightKg, heightCm / 100.0);
+        log.info("📡 HERE Maps API call: weight={}kg, height={}m, preferMotorway={}",
+                weightKg, heightCm / 100.0, preferMotorway);
 
         try {
             Map<String, Object> response = restTemplate.getForObject(url, Map.class);
@@ -64,7 +84,8 @@ public class HereMapsService {
                 return buildBlockedResult("HERE Maps nie zwróciło odpowiedzi");
             }
 
-            logHereRouteDetails(response);
+            // ✅ ZMIENIONE - przekazujemy informację o preferencji do logowania
+            logHereRouteDetails(response, preferMotorway);
             logViolations(response);
             compareTransportWithRoute(weightKg, heightCm, response);
 
@@ -101,6 +122,7 @@ public class HereMapsService {
             result.put("notices", notices);
             result.put("validationSource", "HERE_MAPS");
             result.put("routeBlocked", false);
+            result.put("preferMotorway", preferMotorway); // ✅ NOWE - informacja o preferencji
 
             log.info("✅ Walidacja zakończona: {} ostrzeżeń", notices.size());
 
@@ -168,12 +190,21 @@ public class HereMapsService {
         return result;
     }
 
+    /**
+     * ✅ ZAKTUALIZOWANA METODA: Buduje zapytanie z preferencją autostrad
+     *
+     * ZMIANY:
+     * - Dodano parametr preferMotorway
+     * - Dla pojazdów >60T: routingMode="fast" preferuje autostrady
+     * - Unikanie tuneli dla ciężkich pojazdów (bezpieczeństwo)
+     */
     private UriComponentsBuilder buildRouteRequest(
             double startLat, double startLng,
             double endLat, double endLng,
-            int weightKg, int heightCm) {
+            int weightKg, int heightCm,
+            boolean preferMotorway) {
 
-        return UriComponentsBuilder
+        UriComponentsBuilder builder = UriComponentsBuilder
                 .fromHttpUrl("https://router.hereapi.com/v8/routes")
                 .queryParam("apikey", getApiKey())
                 .queryParam("transportMode", "truck")
@@ -185,12 +216,28 @@ public class HereMapsService {
                 .queryParam("truck[grossWeight]", weightKg)
                 .queryParam("truck[height]", heightCm / 100.0)
                 .queryParam("truck[width]", 3.7)
-                .queryParam("truck[length]", 18.5)
-                .queryParam("avoid[features]", "ferry")
-                .queryParam("routingMode", "fast");
+                .queryParam("truck[length]", 18.5);
+
+        // ✅ NOWE - Różne strategie routingu dla ciężkich i lekkich pojazdów
+        if (preferMotorway) {
+            // Dla pojazdów >60T: priorytet dla autostrad (bezpieczeństwo)
+            builder.queryParam("routingMode", "fast")  // Fast preferuje autostrady
+                    .queryParam("avoid[features]", "ferry,tunnel"); // Unikaj promów i tuneli
+            log.info("🛣️ Routing: PREFEROWANE AUTOSTRADY (pojazd >60T)");
+        } else {
+            // Dla lekkich pojazdów: optymalna trasa
+            builder.queryParam("routingMode", "fast")
+                    .queryParam("avoid[features]", "ferry");
+            log.info("🛣️ Routing: TRASA OPTYMALNA (pojazd <60T)");
+        }
+
+        return builder;
     }
 
-    private void logHereRouteDetails(Map<String, Object> response) {
+    /**
+     * ✅ ZAKTUALIZOWANA METODA: Logowanie z informacją o preferencji autostrad
+     */
+    private void logHereRouteDetails(Map<String, Object> response, boolean preferMotorway) {
         try {
             List<Map<String, Object>> routes = (List<Map<String, Object>>) response.get("routes");
             if (routes == null || routes.isEmpty()) return;
@@ -202,6 +249,13 @@ public class HereMapsService {
             log.info("╔═══════════════════════════════════════════════════════════");
             log.info("║ 📊 SZCZEGÓŁY TRASY Z HERE MAPS");
             log.info("╠═══════════════════════════════════════════════════════════");
+
+            // ✅ NOWE - Informacja o preferencji
+            if (preferMotorway) {
+                log.info("║ 🛣️  PREFEROWANA TRASA: AUTOSTRADA (pojazd >60T)");
+            } else {
+                log.info("║ 🗺️  TRASA: OPTYMALNA (pojazd <60T)");
+            }
 
             double totalDistance = 0;
             int totalDuration = 0;
@@ -582,7 +636,11 @@ public class HereMapsService {
 
         log.info("🚀 Obliczam trasę z wykluczeniem {} obszarów", excludedLocations.size());
 
-        UriComponentsBuilder builder = buildRouteRequest(startLat, startLng, endLat, endLng, weightKg, heightCm);
+        // ✅ ZMIENIONE - sprawdź czy pojazd preferuje autostrady
+        boolean preferMotorway = weightKg > HEAVY_VEHICLE_THRESHOLD_KG;
+
+        UriComponentsBuilder builder = buildRouteRequest(
+                startLat, startLng, endLat, endLng, weightKg, heightCm, preferMotorway);
 
         for (double[] location : excludedLocations) {
             double latOffset = EXCLUSION_RADIUS_KM / 111.0;
@@ -616,7 +674,7 @@ public class HereMapsService {
             }
 
             log.info("📊 TRASA OBJAZDOWA:");
-            logHereRouteDetails(response);
+            logHereRouteDetails(response, preferMotorway);
             logViolations(response);
 
             Set<String> excludedNames = excludedPoints.stream()
@@ -657,6 +715,7 @@ public class HereMapsService {
             result.put("excluded_objects_remaining", 0);
             result.put("validationSource", "HERE_MAPS_POINT_DETOUR");
             result.put("routeBlocked", false);
+            result.put("preferMotorway", preferMotorway); // ✅ NOWE
 
             return result;
 
@@ -696,6 +755,9 @@ public class HereMapsService {
         }
     }
 
+    /**
+     * Przeciążona metoda bez excludedNames dla wstecznej kompatybilności
+     */
     public Map<String, Object> validateRoute(
             double startLat, double startLng,
             double endLat, double endLng,
@@ -704,6 +766,9 @@ public class HereMapsService {
         return validateRoute(startLat, startLng, endLat, endLng, weightKg, heightCm, null);
     }
 
+    /**
+     * Pobieranie alternatywnych tras
+     */
     public List<Map<String, Object>> getAlternativeRoutes(
             double startLat, double startLng,
             double endLat, double endLng,
@@ -713,11 +778,15 @@ public class HereMapsService {
 
         List<Map<String, Object>> alternatives = new ArrayList<>();
 
+        // ✅ ZMIENIONE - sprawdź preferencję autostrad
+        boolean preferMotorway = transportSet.getTotalWeightKg() > HEAVY_VEHICLE_THRESHOLD_KG;
+
         try {
             UriComponentsBuilder builder = buildRouteRequest(
                     startLat, startLng, endLat, endLng,
                     transportSet.getTotalWeightKg(),
-                    transportSet.getTotalHeightCm()
+                    transportSet.getTotalHeightCm(),
+                    preferMotorway
             );
 
             builder.queryParam("alternatives", 3);
@@ -767,6 +836,9 @@ public class HereMapsService {
         return alternatives;
     }
 
+    /**
+     * Klasa pomocnicza dla wykluczonych punktów
+     */
     private static class ExcludedPoint {
         String name;
         String instruction;

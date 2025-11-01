@@ -1,6 +1,8 @@
 package com.military.applogistic.entity;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Entity
@@ -12,6 +14,7 @@ public class Vehicle {
     private Long id;
 
     @Column(nullable = false)
+    @NotNull
     private String model;
 
     @Enumerated(EnumType.STRING)
@@ -22,9 +25,9 @@ public class Vehicle {
     private Integer maxAxleLoadKg;
     private Boolean active = true;
 
-    // NOWE POLA
-    private Boolean canDriveAlone = false; // Czy może jechać solo bez naczepy
-    private String vehicleCategory; // "TRUCK", "MILITARY_VEHICLE", "STANDALONE"
+
+    private Boolean canDriveAlone = false;
+    private String vehicleCategory;
 
     public enum VehicleType {
         TRANSPORTER, CARGO

@@ -22,6 +22,9 @@ public class Route {
     @Lob
     private String routeDataJson; // Google Maps response
 
+    @Lob
+    private String rejectedPointsJson; // NOWE - JSON z odrzuconymi punktami
+
     private Double totalDistanceKm;
     private Integer estimatedTimeMinutes;
 
@@ -35,12 +38,27 @@ public class Route {
     @Enumerated(EnumType.STRING)
     private RouteStatus status = RouteStatus.CREATED;
 
+    // NOWE POLA
+    private Boolean isDraft = false; // czy trasa jest wersją roboczą
+    private Boolean hasValidationProblems = false; // czy ma problemy z walidacją
+    private Boolean operatorAccepted = false; // czy operator zaakceptował mimo problemów
+    private String operatorAcceptedBy; // kto zaakceptował
+    private LocalDateTime operatorAcceptedAt; // kiedy zaakceptowano
+    private String operatorComment; // komentarz operatora przy akceptacji
+
     private LocalDateTime createdAt = LocalDateTime.now();
     private LocalDateTime assignedAt;
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
 
     public enum RouteStatus {
-        CREATED, ASSIGNED,IN_PROGRESS, ACTIVE, COMPLETED
+        CREATED,
+        DRAFT,
+        VALIDATION_REQUIRED,
+        REVALIDATING,         // ✅ DODAJ TĘ LINIĘ
+        ASSIGNED,
+        IN_PROGRESS,
+        ACTIVE,
+        COMPLETED
     }
 }

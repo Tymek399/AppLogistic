@@ -1,8 +1,10 @@
-package com.military.applogistic.dto.response;
+package com.military.applogistic.dto.response;// RouteResponse.java - rozszerzona o nowe pola
+
 
 import lombok.Data;
-import com.military.applogistic.entity.Route;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Data
 public class RouteResponse {
@@ -10,21 +12,18 @@ public class RouteResponse {
     private String startAddress;
     private String endAddress;
     private String status;
-    private Double totalDistanceKm;
-    private Integer estimatedTimeMinutes;
-    private String assignedDriver;
-    private boolean hasRestrictions;
-    private List<String> warnings;
+    private Double distance;
+    private Integer estimatedTime;
+    private Long transportSetId;
+    private String createdBy;
+    private LocalDateTime createdAt;
 
-    public static RouteResponse from(Route route) {
-        RouteResponse response = new RouteResponse();
-        response.setId(route.getId());
-        response.setStartAddress(route.getStartAddress());
-        response.setEndAddress(route.getEndAddress());
-        response.setStatus(route.getStatus().toString());
-        response.setTotalDistanceKm(route.getTotalDistanceKm());
-        response.setEstimatedTimeMinutes(route.getEstimatedTimeMinutes());
-        response.setAssignedDriver(route.getAssignedDriverUsername());
-        return response;
-    }
+    // NOWE POLA
+    private Boolean isDraft;
+    private Boolean hasValidationProblems;
+    private Boolean operatorAccepted;
+    private List<String> operatorMessages;
+    private List<Map<String, Object>> rejectedPoints;
+    private Map<String, Object> validation;
+    private Map<String, Object> routeData;
 }

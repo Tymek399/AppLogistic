@@ -3,6 +3,8 @@ package com.military.applogistic.service;
 import com.military.applogistic.config.ApiKeysConfig;
 import com.military.applogistic.entity.TransportSet;
 import com.military.applogistic.service.OverpassService.InfrastructurePoint;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import lombok.RequiredArgsConstructor;
@@ -30,23 +32,28 @@ public class GoogleMapsService {
     private static final double DETOUR_DISTANCE_KM = 2.0;
     private static final int MAX_ROUTE_ATTEMPTS = 10;
 
+    /**
+     * ✅ GŁÓWNA METODA - Z PARAMETREM preferHighways
+     */
     public Map<String, Object> getRoute(String startAddress, String endAddress,
-                                        TransportSet transportSet, Set<String> excludedBridges) {
+                                        TransportSet transportSet, Set<String> excludedBridges,
+                                        boolean preferHighways) {
         if (!apiKeysConfig.isGoogleMapsEnabled()) {
             throw new RuntimeException("Google Maps API not configured");
         }
 
         try {
             log.info("🗺️ Pobieranie trasy: {} → {}", startAddress, endAddress);
-            log.info("Parametry: masa={}kg, wysokość={}cm",
-                    transportSet.getTotalWeightKg(), transportSet.getTotalHeightCm());
+            log.info("Parametry: masa={}kg, wysokość={}cm, preferHighways={}",
+                    transportSet.getTotalWeightKg(), transportSet.getTotalHeightCm(), preferHighways);
 
             if (transportSet.getTotalWeightKg() <= LIGHT_VEHICLE_THRESHOLD_KG) {
                 log.info("⚡ Pojazd lekki (≤5t) - pomijam walidację mostów");
                 return createLightVehicleRoute(startAddress, endAddress, transportSet);
             }
 
-            return createHeavyVehicleRouteWithAvoidance(startAddress, endAddress, transportSet, excludedBridges);
+            return createHeavyVehicleRouteWithAvoidance(startAddress, endAddress,
+                    transportSet, excludedBridges, preferHighways);
 
         } catch (Exception e) {
             log.error("❌ Błąd pobierania trasy", e);
@@ -54,10 +61,19 @@ public class GoogleMapsService {
         }
     }
 
+    /**
+     * ✅ PRZECIĄŻONA METODA - Dla kompatybilności wstecznej
+     */
+    public Map<String, Object> getRoute(String startAddress, String endAddress,
+                                        TransportSet transportSet, Set<String> excludedBridges) {
+        return getRoute(startAddress, endAddress, transportSet, excludedBridges, false);
+    }
+
     private Map<String, Object> createLightVehicleRoute(
             String startAddress, String endAddress, TransportSet transportSet) {
 
-        Map<String, Object> googleResponse = performGoogleMapsApiCall(startAddress, endAddress, new HashSet<>());
+        Map<String, Object> googleResponse = performGoogleMapsApiCall(
+                startAddress, endAddress, new HashSet<>(), false);
 
         googleResponse.put("lightVehicle", true);
         googleResponse.put("validationSkipped", true);
@@ -73,9 +89,13 @@ public class GoogleMapsService {
         return googleResponse;
     }
 
+    /**
+     * ✅ ZAKTUALIZOWANA - Z PARAMETREM preferHighways
+     */
     private Map<String, Object> createHeavyVehicleRouteWithAvoidance(
             String startAddress, String endAddress,
-            TransportSet transportSet, Set<String> excludedBridges) {
+            TransportSet transportSet, Set<String> excludedBridges,
+            boolean preferHighways) {
 
         Set<String> allExcluded = new HashSet<>(excludedBridges);
         List<Map<String, Object>> attemptReports = new ArrayList<>();
@@ -83,13 +103,14 @@ public class GoogleMapsService {
         for (int attempt = 1; attempt <= MAX_ROUTE_ATTEMPTS; attempt++) {
             log.info("🔄 Próba #{} - wykluczonych obiektów: {}", attempt, allExcluded.size());
 
-            Map<String, Object> googleResponse = performGoogleMapsApiCall(startAddress, endAddress, allExcluded);
+            Map<String, Object> googleResponse = performGoogleMapsApiCall(
+                    startAddress, endAddress, allExcluded, preferHighways);
+
             List<double[]> routeCoordinates = extractDetailedRouteCoordinates(googleResponse);
 
             List<InfrastructurePoint> infrastructure = overpassService.getInfrastructureAlongRoute(routeCoordinates);
             infrastructure = filterExcludedBridges(infrastructure, allExcluded);
 
-            // ✅ NOWA WALIDACJA Z MARGINESAMI I POZWOLENIAMI
             List<InfrastructurePoint> blockedObjects = infrastructure.stream()
                     .filter(point -> !canPassInfrastructure(point, transportSet))
                     .collect(Collectors.toList());
@@ -99,6 +120,7 @@ public class GoogleMapsService {
             attemptReport.put("excludedCount", allExcluded.size());
             attemptReport.put("infrastructureChecked", infrastructure.size());
             attemptReport.put("blockedObjects", blockedObjects.size());
+            attemptReport.put("preferHighways", preferHighways);
             attemptReports.add(attemptReport);
 
             if (blockedObjects.isEmpty()) {
@@ -118,6 +140,7 @@ public class GoogleMapsService {
                 );
                 result.put("searchAttempts", attempt);
                 result.put("attemptReports", attemptReports);
+                result.put("preferredHighways", preferHighways);
 
                 return result;
             }
@@ -135,7 +158,59 @@ public class GoogleMapsService {
                 "Zablokowane obiekty: " + String.join(", ", allExcluded));
     }
 
-    // ✅ ZAKTUALIZOWANA METODA - sprawdza czy można przejechać
+    /**
+     * ✅ ZAKTUALIZOWANA - Z PARAMETREM preferHighways
+     */
+    private Map<String, Object> performGoogleMapsApiCall(
+            String startAddress, String endAddress, Set<String> excludedBridges,
+            boolean preferHighways) {
+
+        StringBuilder url = new StringBuilder(String.format(
+                "%s/directions/json?origin=%s&destination=%s&key=%s&mode=driving&alternatives=true&language=pl&region=pl",
+                apiKeysConfig.getGoogleMaps().getBaseUrl(),
+                encodeAddress(startAddress),
+                encodeAddress(endAddress),
+                apiKeysConfig.getGoogleMaps().getKey()
+        ));
+
+        // ✅ NOWE - Preferowanie autostrad
+        if (preferHighways) {
+            url.append("&avoid=tolls"); // Nie unikaj płatnych dróg (autostrady)
+            log.info("🛣️ PREFERUJĘ AUTOSTRADY - avoid=tolls WYŁĄCZONE");
+        } else {
+            url.append("&avoid=tolls"); // Standardowe omijanie
+            log.info("🗺️ Trasa standardowa");
+        }
+
+        log.info("📡 Calling Google Maps Directions API");
+
+        try {
+            Map<String, Object> response = restTemplate.getForObject(url.toString(), Map.class);
+
+            if (response == null) {
+                throw new RuntimeException("Empty response from Google Maps API");
+            }
+
+            String status = (String) response.get("status");
+            if (!"OK".equals(status)) {
+                String errorMessage = (String) response.get("error_message");
+                throw new RuntimeException("Google Maps API error: " + status +
+                        (errorMessage != null ? " - " + errorMessage : ""));
+            }
+
+            log.info("✅ Google Maps route retrieved successfully");
+            return response;
+
+        } catch (Exception e) {
+            log.error("❌ Google Maps API call failed", e);
+            throw new RuntimeException("Google Maps API call failed: " + e.getMessage(), e);
+        }
+    }
+
+    // ========================================================================
+    // POZOSTAŁE METODY BEZ ZMIAN
+    // ========================================================================
+
     private boolean canPassInfrastructure(InfrastructurePoint point, TransportSet transportSet) {
         MilitaryLoadCalculator.BridgeSpecification spec =
                 bridgeDataService.enrichBridgeData(point, transportSet);
@@ -147,7 +222,6 @@ public class GoogleMapsService {
         double transportWeightTons = transportSet.getTotalWeightKg() / 1000.0;
         double transportHeightM = transportSet.getTotalHeightCm() / 100.0;
 
-        // ✅ NOWA WALIDACJA Z MARGINESAMI I UPRAWNIENIAMI
         MilitaryRoadPermissions.ValidationResult validation =
                 militaryRoadPermissions.validatePassage(
                         transportWeightTons,
@@ -157,7 +231,6 @@ public class GoogleMapsService {
                         spec.getBridgeType()
                 );
 
-        // ✅ USTAW INFORMACJE O LOKALIZACJI W VALIDATION RESULT
         validation.setInfrastructureName(point.getName());
         validation.setCity(spec.getCity());
         validation.setRoadName(spec.getLocation());
@@ -199,42 +272,6 @@ public class GoogleMapsService {
                     return true;
                 })
                 .collect(Collectors.toList());
-    }
-
-    private Map<String, Object> performGoogleMapsApiCall(
-            String startAddress, String endAddress, Set<String> excludedBridges) {
-
-        String url = String.format(
-                "%s/directions/json?origin=%s&destination=%s&key=%s&mode=driving&alternatives=true&language=pl&avoid=tolls&region=pl",
-                apiKeysConfig.getGoogleMaps().getBaseUrl(),
-                encodeAddress(startAddress),
-                encodeAddress(endAddress),
-                apiKeysConfig.getGoogleMaps().getKey()
-        );
-
-        log.info("📡 Calling Google Maps Directions API");
-
-        try {
-            Map<String, Object> response = restTemplate.getForObject(url, Map.class);
-
-            if (response == null) {
-                throw new RuntimeException("Empty response from Google Maps API");
-            }
-
-            String status = (String) response.get("status");
-            if (!"OK".equals(status)) {
-                String errorMessage = (String) response.get("error_message");
-                throw new RuntimeException("Google Maps API error: " + status +
-                        (errorMessage != null ? " - " + errorMessage : ""));
-            }
-
-            log.info("✅ Google Maps route retrieved successfully");
-            return response;
-
-        } catch (Exception e) {
-            log.error("❌ Google Maps API call failed", e);
-            throw new RuntimeException("Google Maps API call failed: " + e.getMessage(), e);
-        }
     }
 
     private List<double[]> extractDetailedRouteCoordinates(Map<String, Object> googleRoute) {
@@ -299,7 +336,6 @@ public class GoogleMapsService {
         return path;
     }
 
-    // ✅ ZAKTUALIZOWANA METODA - combineAllValidations Z POZWOLENIAMI I MIASTAMI
     private Map<String, Object> combineAllValidations(
             Map<String, Object> googleRoute,
             List<InfrastructurePoint> osmInfrastructure,
@@ -325,7 +361,7 @@ public class GoogleMapsService {
         List<String> allWarnings = new ArrayList<>();
         List<String> allRestrictions = new ArrayList<>();
         List<String> allViolations = new ArrayList<>();
-        List<String> allPermits = new ArrayList<>(); // ✅ LISTA POZWOLEŃ
+        List<String> allPermits = new ArrayList<>();
         List<Map<String, Object>> infrastructureDetails = new ArrayList<>();
 
         for (InfrastructurePoint point : osmInfrastructure) {
@@ -341,7 +377,6 @@ public class GoogleMapsService {
                 double transportWeightTons = transportSet.getTotalWeightKg() / 1000.0;
                 double transportHeightM = transportSet.getTotalHeightCm() / 100.0;
 
-                // ✅ WALIDACJA Z MARGINESAMI
                 MilitaryRoadPermissions.ValidationResult validation =
                         militaryRoadPermissions.validatePassage(
                                 transportWeightTons,
@@ -351,13 +386,11 @@ public class GoogleMapsService {
                                 spec.getBridgeType()
                         );
 
-                // ✅ USTAW INFORMACJE O LOKALIZACJI
                 validation.setInfrastructureName(point.getName());
                 validation.setCity(spec.getCity());
                 validation.setRoadName(spec.getLocation());
 
                 if (validation.isRequiresPermit()) {
-                    // ✅ UŻYJ NOWEJ METODY Z MIASTEM
                     String permitMsg = militaryRoadPermissions.getPermitDescriptionWithLocation(validation);
                     allPermits.add(permitMsg);
                     log.info("⚠️ POZWOLENIE: {}", permitMsg);
@@ -398,11 +431,11 @@ public class GoogleMapsService {
         combined.put("hasViolations", !allViolations.isEmpty());
         combined.put("hasRestrictions", !allRestrictions.isEmpty());
         combined.put("hasWarnings", !allWarnings.isEmpty());
-        combined.put("requiresPermits", !allPermits.isEmpty()); // ✅ NOWE
+        combined.put("requiresPermits", !allPermits.isEmpty());
         combined.put("violations", allViolations);
         combined.put("restrictions", allRestrictions);
         combined.put("warnings", allWarnings);
-        combined.put("permits", allPermits); // ✅ NOWE - LISTA POZWOLEŃ Z MIASTAMI
+        combined.put("permits", allPermits);
         combined.put("infrastructureDetails", infrastructureDetails);
         combined.put("routeJustification", buildDetailedJustification(
                 osmInfrastructure, transportSet, allViolations, allRestrictions, allWarnings, allPermits));
@@ -414,7 +447,6 @@ public class GoogleMapsService {
         return combined;
     }
 
-    // ✅ ZAKTUALIZOWANA METODA - analyzeInfrastructurePoint
     private Map<String, Object> analyzeInfrastructurePoint(
             InfrastructurePoint point, TransportSet transportSet) {
 
@@ -434,7 +466,6 @@ public class GoogleMapsService {
             return detail;
         }
 
-        // ✅ DODAJ MIASTO DO SZCZEGÓŁÓW
         if (spec.getCity() != null) {
             detail.put("city", spec.getCity());
         }
@@ -445,7 +476,6 @@ public class GoogleMapsService {
         double transportWeightTons = transportSet.getTotalWeightKg() / 1000.0;
         double transportHeightM = transportSet.getTotalHeightCm() / 100.0;
 
-        // ✅ NOWA WALIDACJA Z MARGINESAMI
         MilitaryRoadPermissions.ValidationResult validation =
                 militaryRoadPermissions.validatePassage(
                         transportWeightTons,
@@ -455,7 +485,6 @@ public class GoogleMapsService {
                         spec.getBridgeType()
                 );
 
-        // ✅ USTAW LOKALIZACJĘ
         validation.setInfrastructureName(point.getName());
         validation.setCity(spec.getCity());
         validation.setRoadName(spec.getLocation());
@@ -486,7 +515,6 @@ public class GoogleMapsService {
         return detail;
     }
 
-    // ✅ ZAKTUALIZOWANA METODA - buildDetailedJustification
     private String buildDetailedJustification(
             List<InfrastructurePoint> infrastructure,
             TransportSet transportSet,
@@ -567,7 +595,7 @@ public class GoogleMapsService {
                 apiKeysConfig.getGoogleMaps().getKey()
         );
 
-        log.info("🔍 Geocoding: {}", address);
+        log.info("📍 Geocoding: {}", address);
 
         try {
             @SuppressWarnings("unchecked")
@@ -634,6 +662,28 @@ public class GoogleMapsService {
         } catch (Exception e) {
             log.error("❌ Reverse geocoding error", e);
             return String.format("%.6f, %.6f", lat, lng);
+        }
+    }
+
+    public Map<String, Object> getBasicRoute(String startAddress, String endAddress) {
+        try {
+            String url = String.format("%s/directions/json?origin=%s&destination=%s&mode=driving&language=pl&region=pl&key=%s",
+                    apiKeysConfig.getGoogleMaps().getBaseUrl(),
+                    URLEncoder.encode(startAddress, StandardCharsets.UTF_8),
+                    URLEncoder.encode(endAddress, StandardCharsets.UTF_8),
+                    apiKeysConfig.getGoogleMaps().getKey()
+            );
+
+            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+
+            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                return response.getBody();
+            }
+
+            return new HashMap<>();
+        } catch (Exception e) {
+            log.error("Error getting basic route: {}", e.getMessage());
+            return new HashMap<>();
         }
     }
 
