@@ -216,7 +216,6 @@ class OperatorDashboard {
             this.transportSets = await response.json();
             this.populateTransportSetsSelect();
         } catch (error) {
-            console.error('Error loading transport sets:', error);
             this.showError('Błąd podczas ładowania zestawów');
         }
     }
@@ -264,31 +263,33 @@ class OperatorDashboard {
     }
 
     /**
-     * ✅ ZMODYFIKOWANA FUNKCJA RENDEROWANIA (dla wyświetlania limitów i domyślnego REJECT)
-     * Zgodna z poprawioną logiką backendu.
+     * ✅ P3 FIX: POPRAWIONE PARSOWANIE DETALI I DOMYŚLNE ODRZUCANIE
      */
     renderRouteRequiringAcceptance(route) {
         let rejectedPointsHtml = '';
+
+        // Wyodrębnij parametry transportu (zawsze dostępne w routeData)
+        const validationDetails = route.routeData?.validation;
+        // W najnowszej wersji back-endu, transportInfo jest bezpośrednio w routeData
+        const transportInfo = route.routeData?.transportSetInfo || {};
+        const transportWeightTons = transportInfo.weightTon;
+        const transportHeightMeters = transportInfo.heightM;
+
+
         if (route.rejectedPoints && route.rejectedPoints.length > 0) {
             rejectedPointsHtml = `
                 <div class="rejected-points mb-3">
                     <h6>Zidentyfikowane punkty problematyczne (${route.rejectedPoints.length}):</h6>
                     <div id="decision-list-${route.id}">
                         ${route.rejectedPoints.map((point, idx) => {
-                // Wydobycie danych z tablicy "reason" (która w backendzie jest listą stringów)
                 const reasonArray = point.reason || [];
                 const mainReason = reasonArray.length > 0 ? reasonArray[0] : 'Brak szczegółowego powodu.';
 
-                // Dodanie formatowania dla limitów i przekroczeń (jeśli dane są obecne w stringu)
-                let detailsHtml = `<span class="text-danger">${escapeHtml(mainReason)}</span>`;
+                // P3 FIX: Ekstrakcja limitów za pomocą regex
+                let detailsHtml = `<span class="text-danger"><strong>Powód:</strong> ${escapeHtml(mainReason.split(' (Limit')[0] || mainReason)}</span>`;
 
-                // Wyszukiwanie limitów w stringu (np. "(Limit nośności: 75.0t)")
                 const weightMatch = mainReason.match(/\(Limit nośności: ([\d.]+t)\)/);
                 const heightMatch = mainReason.match(/\(Limit wysokości: ([\d.]+m)\)/);
-
-                // Pobranie parametrów transportu (konieczne do porównania)
-                const transportWeight = route.routeData?.transportSet?.totalWeightTons;
-                const transportHeight = route.routeData?.transportSet?.totalHeightMeters;
 
                 let limitInfo = '';
 
@@ -296,21 +297,22 @@ class OperatorDashboard {
                     limitInfo += '<ul class="list-unstyled mt-2 mb-0" style="font-size:0.9em;">';
 
                     if (weightMatch) {
-                        const limit = parseFloat(weightMatch[1].replace('t', ''));
-                        const actual = transportWeight ? transportWeight.toFixed(1) : 'N/A';
-                        const isViolation = transportWeight > limit;
-                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Nośność:</strong> ${actual}t (Limit: ${weightMatch[1]}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                        const limitStr = weightMatch[1];
+                        const limit = parseFloat(limitStr.replace('t', ''));
+                        const actual = transportWeightTons ? transportWeightTons.toFixed(1) : 'N/A';
+                        const isViolation = transportWeightTons > limit;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Nośność:</strong> ${actual}t (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
                     }
 
                     if (heightMatch) {
-                        const limit = parseFloat(heightMatch[1].replace('m', ''));
-                        const actual = transportHeight ? transportHeight.toFixed(2) : 'N/A';
-                        const isViolation = transportHeight > limit;
-                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Wysokość:</strong> ${actual}m (Limit: ${heightMatch[1]}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                        const limitStr = heightMatch[1];
+                        const limit = parseFloat(limitStr.replace('m', ''));
+                        const actual = transportHeightMeters ? transportHeightMeters.toFixed(2) : 'N/A';
+                        const isViolation = transportHeightMeters > limit;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Wysokość:</strong> ${actual}m (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
                     }
                     limitInfo += '</ul>';
                 }
-                // Koniec dodawania formatowania
 
                 return `
                                 <div class="rejected-point-item" data-point-name="${escapeHtml(point.name || 'Unknown Point')}">
@@ -371,14 +373,17 @@ class OperatorDashboard {
                         <button class="btn btn-info" onclick="showRouteOnMap(${route.id})">
                             🗺️ Pokaż na mapie
                         </button>
-                        </div>
+                        <button class="btn btn-danger" onclick="operatorDashboard.deleteRoute(${route.id})">
+                            ❌ Odrzuć/Usuń trasę
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
     }
 
     /**
-     * ✅ KLUCZOWA POPRAWKA LOGIKI: Zbiera indywidualne decyzje i wysyła je do backendu.
+     * ✅ P2 FIX: Implementuje logikę rewalidacji/akceptacji.
      */
     async submitPointDecisions(routeId) {
         const card = document.getElementById(`route-card-acceptance-${routeId}`);
@@ -413,7 +418,6 @@ class OperatorDashboard {
         if (!confirm(confirmationMessage)) return;
 
         try {
-            // Zablokuj przycisk
             const button = card.querySelector('.btn-warning');
             button.disabled = true;
             button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Przetwarzanie...';
@@ -429,7 +433,10 @@ class OperatorDashboard {
                 throw new Error(result.error || 'Błąd przetwarzania decyzji');
             }
 
-            // Backend zwróci informację o wyniku (ROUTE_ACCEPTED lub REQUIRES_REVIEW_AGAIN)
+            // P1 FIX: Przeładowanie po akcji
+            this.loadRoutesRequiringAcceptance();
+            this.loadAllRoutes();
+
             if (result.action === 'ROUTE_ACCEPTED') {
                 this.showSuccess(`✅ ${result.message || 'Trasa zaakceptowana pomyślnie'}`);
             } else if (result.action === 'REQUIRES_REVIEW_AGAIN') {
@@ -437,10 +444,6 @@ class OperatorDashboard {
             } else {
                 this.showSuccess('Decyzje przetworzone.');
             }
-
-            // Przeładuj obie listy
-            this.loadRoutesRequiringAcceptance();
-            this.loadAllRoutes();
 
         } catch (error) {
             this.showError('Błąd podczas przesyłania decyzji: ' + error.message);
@@ -490,9 +493,13 @@ class OperatorDashboard {
         }
     }
 
+    /**
+     * ✅ P1 FIX: Naprawiona logika ładowania wszystkich tras.
+     */
     async loadAllRoutes() {
         const container = document.getElementById('routes-list');
         if (!container) return;
+        // Płynne ładowanie (poprawka P1)
         container.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div></div>';
         try {
             const response = await fetch('/api/routes/all');
@@ -515,7 +522,7 @@ class OperatorDashboard {
 
         try {
             const usersResponse = await fetch('/api/admin/users');
-            if (!usersResponse.ok) throw new Error('Nie udało się załadować użytkowników');
+            if (!usersResponse.ok) throw new Error('Failed to load users');
             const allUsers = await usersResponse.json();
             const drivers = allUsers.filter(u => u.role === 'DRIVER');
 
@@ -596,13 +603,13 @@ class OperatorDashboard {
 
     // ✅ ZMIANA: Ta funkcja teraz tylko pokazuje modal
     async showAddDriverModal() {
-        if (this.addDriverModalInstance) {
-            document.getElementById('add-driver-form').reset();
-            this.addDriverModalInstance.show();
-        } else {
-            // Fallback, gdyby bootstrap nie zadziałał
-            alert('Błąd: Nie można otworzyć formularza. Odśwież stronę.');
+        if (!this.addDriverModalInstance) {
+            alert('Błąd: Modal nie jest zainicjalizowany');
+            return;
         }
+
+        document.getElementById('add-driver-form').reset();
+        this.addDriverModalInstance.show();
     }
 
     // ✅ ZMIANA: Nowa funkcja do obsługi formularza dodawania kierowcy
@@ -957,8 +964,6 @@ class OperatorDashboard {
             .then(response => {
                 if (!response.ok) throw new Error('Nie udało się usunąć trasy');
                 this.showSuccess('Trasa usunięta');
-
-                // ✅ POPRAWKA: Odświeżenie list po usunięciu
                 this.loadAllRoutes();
                 this.loadRoutesRequiringAcceptance();
             })
@@ -1002,7 +1007,6 @@ async function initializeSystem() {
         // `onGoogleMapsLoaded` (callback z Google) wywoła `operatorDashboard.initMap()`
 
         // `init()` klasy zajmie się resztą (ładowaniem danych, itd.)
-        // setupAuth() jest już wywołane, więc init() go nie powtórzy
         operatorDashboard.init();
 
         switchTab('routes');
@@ -1293,25 +1297,28 @@ async function displayRoutesWithAllButtons() {
     }
 
     let html = '';
-    for (const route of operatorDashboard.routes) {
-        // Używamy "isDraft" i "operatorAccepted" z "nowej" logiki
-        const validation = await getRouteValidation(route.id);
-        html += createCompleteRouteCard(route, validation);
+    // P1 FIX: Używamy Promise.all, aby przyspieszyć asynchroniczne pobieranie detali
+    const detailPromises = operatorDashboard.routes.map(route => getRouteValidation(route.id));
+    const validations = await Promise.all(detailPromises);
+
+    for (let i = 0; i < operatorDashboard.routes.length; i++) {
+        html += createCompleteRouteCard(operatorDashboard.routes[i], validations[i]);
     }
     container.innerHTML = html;
 }
 
 async function getRouteValidation(routeId) {
     try {
+        // Poprawka dla P6: upewniamy się, że endpoint zwraca szczegóły
         const response = await fetch(`/api/routes/${routeId}/validation-details`);
         if (!response.ok) return null;
         return await response.json();
     } catch (error) {
-        console.error('Error loading validation:', error);
         return null;
     }
 }
 
+// P4 FIX: Funkcja generująca kartę trasy, która wyświetla miasto i pełne detale
 function createCompleteRouteCard(route, validation) {
     let html = `
         <div class="route-card ${route.isDraft ? 'border-warning' : ''}">
@@ -1322,7 +1329,7 @@ function createCompleteRouteCard(route, validation) {
                     <p class="mb-1"><strong>Koniec:</strong> ${route.endAddress}</p>
     `;
 
-    // Logika badge'a z "nowej" wersji
+    // Logika badge'a
     let statusBadge = '';
     if (route.isDraft) {
         statusBadge = '<span class="badge bg-warning text-dark">Wymaga Akceptacji</span>';
@@ -1407,6 +1414,7 @@ function createCompleteRouteCard(route, validation) {
             </div>
         `;
     }
+    // P5 FIX: Wyświetl uzasadnienie dla każdej trasy (nawet czystej)
     if (validation && validation.routeJustification && validation.routeJustification.length > 0) {
         html += `
             <div class="mt-3">
@@ -1430,30 +1438,37 @@ function createCompleteRouteCard(route, validation) {
     return html;
 }
 
+// P4 FIX: Parsowanie stringu pozwolenia, aby wyodrębnić miasto
 function parsePermitString(permitString, index) {
     let html = `<div class="permit-item"><div style="display:flex; align-items:center; margin-bottom:8px;">`;
     html += `<span style="background:#ff9800;color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;margin-right:12px;">${index}</span>`;
     let location = '', city = '', road = '', description = permitString;
+
+    // 1. Ekstrakcja Miasta (w nawiasie)
     const cityMatch = permitString.match(/\(([^)]+)\)/);
     if (cityMatch) {
         city = cityMatch[1];
-        location = permitString.split('(')[0].trim();
-        description = permitString.substring(permitString.indexOf(')') + 1).trim();
+        // Usuń miasto z całego stringu
+        permitString = permitString.replace(`(${cityMatch[1]})`, '').trim();
     }
-    const roadMatch = description.match(/- droga: ([^:]+):/);
+
+    // 2. Podział na Lokalizację i Drogę
+    const roadMatch = permitString.match(/- droga: ([^|]+)/);
     if (roadMatch) {
         road = roadMatch[1].trim();
-        description = description.substring(description.lastIndexOf(':') + 1).trim();
-    } else if (description.includes(':')) {
-        const colonIndex = description.indexOf(':');
-        if (!location) location = description.substring(0, colonIndex).trim();
-        description = description.substring(colonIndex + 1).trim();
+        // Usuń drogę ze stringu
+        permitString = permitString.replace(roadMatch[0], '').trim();
     }
+
+    // Co zostało, to Lokalizacja/Nazwa
+    location = permitString.split(' | Przekroczenie')[0].trim();
+    description = permitString;
+
+
     html += `<div style="flex:1;">`;
     if (location) html += `<div class="permit-location">${escapeHtml(location)}</div>`;
     if (city) html += `<div class="permit-city">📍 ${escapeHtml(city)}</div>`;
     if (road) html += `<div class="permit-road">🛣️ Droga: ${escapeHtml(road)}</div>`;
-    html += `<div class="permit-description">${escapeHtml(description)}</div>`;
     html += `</div></div></div>`;
     return html;
 }
@@ -1472,40 +1487,78 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// P6 FIX: Poprawiony widok pełnej walidacji (wyświetla listę infrastruktury)
 async function showFullValidation(routeId) {
     const validation = await getRouteValidation(routeId);
-    if (!validation) {
-        alert('Brak danych walidacji dla tej trasy');
+    if (!validation || !validation.validationAvailable) {
+        alert('Brak szczegółowych danych walidacji dla tej trasy.');
         return;
     }
+
     let html = '<div style="max-height: 75vh; overflow-y: auto; padding: 20px;">';
     html += `<h3 style="color:#0d6efd;border-bottom:3px solid #0d6efd;padding-bottom:10px;">Pełna Walidacja Trasy #${routeId}</h3>`;
+
+    // Transport Info Section
     if (validation.transportSetInfo) {
         const info = validation.transportSetInfo;
         html += '<div style="background:#e7f3ff;padding:20px;border-radius:8px;margin:20px 0;border:2px solid #0d6efd;">';
         html += '<h5><strong>Parametry zestawu:</strong></h5>';
         html += '<ul style="margin:10px 0;line-height:1.8;">';
         html += `<li><strong>Opis:</strong> ${info.description || 'N/A'}</li>`;
-        html += `<li><strong>Wysokość:</strong> ${(info.totalHeight_cm/100).toFixed(2)}m`;
-        if (info.trailerHeight_cm && info.cargoHeight_cm) {
-            html += ` (naczepa ${(info.trailerHeight_cm/100).toFixed(2)}m + ładunek ${(info.cargoHeight_cm/100).toFixed(2)}m)`;
-        }
-        html += `</li>`;
+        html += `<li><strong>Wysokość:</strong> ${(info.totalHeight_cm/100).toFixed(2)}m</li>`;
         html += `<li><strong>Waga:</strong> ${(info.totalWeight_kg/1000).toFixed(1)}t</li>`;
-        html += `<li><strong>Długość:</strong> ${(info.totalLength_cm/100).toFixed(2)}m</li>`;
-        html += `<li><strong>Szerokość:</strong> ${(info.totalWidth_cm/100).toFixed(2)}m</li>`;
         html += '</ul></div>';
     }
+
+    // Infrastructure Details Section (P6 FIX: Zawsze wyświetla detale)
+    if (validation.infrastructureDetails && validation.infrastructureDetails.length > 0) {
+        const infrastructureDetails = validation.infrastructureDetails;
+        const blockedCount = infrastructureDetails.filter(d => d.canPass === false).length;
+
+        html += '<div style="background:#f0f0f0;padding:20px;border-radius:8px;margin-top:20px;border:1px solid #ccc;">';
+        html += `<h5>⚙️ Szczegółowa Analiza Infrastruktury (${infrastructureDetails.length} Obiektów)</h5>`;
+        html += `<p class="mb-3">Status: <span class="${blockedCount > 0 ? 'text-danger' : 'text-success'}">
+            ${blockedCount > 0 ? `⚠️ Znaleziono ${blockedCount} problemów` : '✅ Wszystkie punkty przejezdne'}
+        </span></p>`;
+
+        infrastructureDetails.forEach(d => {
+            const isBlocked = d.canPass === false;
+            const statusIcon = isBlocked ? '❌' : (d.requiresPermit ? '⚠️' : '✅');
+            const statusClass = isBlocked ? 'text-danger' : (d.requiresPermit ? 'text-warning' : 'text-success');
+            const name = d.name || 'Nienazwany Obiekt';
+            const city = d.city ? `(${d.city})` : '';
+            const road = d.roadName ? `[${d.roadName}]` : '';
+            const weight = d.maxWeightTons ? `${d.maxWeightTons.toFixed(1)}t` : 'N/A';
+            const height = d.maxHeightMeters ? `${d.maxHeightMeters.toFixed(2)}m` : 'N/A';
+
+            html += `<div class="${statusClass} mb-2 border-bottom pb-1">
+                <strong>${statusIcon} ${name} ${city} ${road}</strong><br>
+                <small>Typ: ${d.type || 'Brak'}, Limit: ${weight} (Masa), ${height} (Wys.)</small>`;
+            if (isBlocked) {
+                html += `<br><small class="text-danger"><strong>Naruszenie:</strong> ${d.violation || 'Brak szczegółów'}</small>`;
+            }
+            html += `</div>`;
+        });
+
+        html += '</div>';
+    } else {
+        html += '<div class="alert alert-info mt-3">ℹ️ Brak krytycznych obiektów infrastruktury (mosty/tunele) na trasie.</div>';
+    }
+
+
+    // Permits Section
     if (validation.permits && validation.permits.length > 0) {
         html += '<div style="background:#fff3cd;padding:20px;border-radius:8px;margin-top:20px;border:2px solid #ffc107;">';
         html += `<h5 style="color:#856404;"><strong>⚠️ WYMAGANE POZWOLENIA (${validation.permits.length}):</strong></h5>`;
         html += '<ul style="margin:10px 0;line-height:2;">';
-        validation.permits.forEach(permit => html += `<li style="margin-bottom:10px;">${escapeHtml(permit)}</li>`);
+        validation.permits.forEach(permit => html += `<li class="text-dark">${escapeHtml(permit)}</li>`);
         html += '</ul></div>';
     }
+
+    // Justification Section (P5 FIX: zawsze jest dostępna)
     if (validation.routeJustification && validation.routeJustification.length > 0) {
         html += '<div style="background:#f8f9fa;padding:20px;border-radius:8px;margin-top:20px;border:2px solid #28a745;">';
-        html += '<h5 style="color:#28a745;"><strong>DLACZEGO TA TRASA?</strong></h5>';
+        html += '<h5 style="color:#28a745;"><strong>DLACZEGO WYBRANO TĘ TRASĘ?</strong></h5>';
         html += '<div style="font-family:monospace;font-size:0.85em;line-height:1.8;margin-top:15px;">';
         validation.routeJustification.forEach(line => {
             let style = 'margin:3px 0;';
@@ -1517,23 +1570,24 @@ async function showFullValidation(routeId) {
         });
         html += '</div></div>';
     }
+
+
     if (validation.violations && validation.violations.length > 0) {
         html += '<div style="background:#f8d7da;border-left:4px solid #dc3545;padding:15px;margin-top:20px;border-radius:5px;">';
-        html += '<h6 style="color:#721c24;"><strong>Naruszenia (użyto trasy alternatywnej):</strong></h6><ul>';
+        html += '<h6 style="color:#721c24;"><strong>Naruszenia (wystąpiły błędy mapowania / brak alternatywy):</strong></h6><ul>';
         validation.violations.forEach(v => html += `<li>${escapeHtml(v)}</li>`);
         html += '</ul></div>';
     }
-    if (!validation.hasViolations && !validation.hasRestrictions && !validation.lightVehicle) {
-        html += '<div style="background:#d4edda;border-left:4px solid #28a745;padding:15px;margin-top:20px;border-radius:5px;">';
-        html += '<h6 style="color:#155724;"><strong>✅ Trasa wolna od ograniczeń!</strong></h6>';
-        html += '</div>';
-    }
+
+    // Obsługa przypadku lekkiego pojazdu
     if (validation.lightVehicle) {
         html += '<div style="background:#d1ecf1;border-left:4px solid #0c5460;padding:15px;margin-top:20px;border-radius:5px;">';
         html += '<h6 style="color:#0c5460;"><strong>ℹ️ Pojazd lekki</strong></h6><p>Walidacja mostów i nośności została pominięta.</p>';
         html += '</div>';
     }
+
     html += '</div>';
+
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
     modal.innerHTML = `
@@ -1670,7 +1724,6 @@ async function updateDriverLocation(driverUsername) {
         }
         operatorDashboard.driverLocationMap.panTo(position);
     } catch (error) {
-        console.error('Błąd aktualizacji lokalizacji kierowcy:', error);
         document.getElementById('driver-status-live').textContent = '❌ Błąd';
         document.getElementById('driver-status-live').style.color = '#dc3545';
     }

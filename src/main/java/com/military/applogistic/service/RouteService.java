@@ -126,6 +126,8 @@ public class RouteService {
             routeData.put("successfulAttempt", 1);
             routeData.put("createdAt", LocalDateTime.now().toString());
             routeData.put("initialGoogleRoute", initialGoogleRoute);
+            // P5 FIX: Generuj uzasadnienie
+            routeData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(transportSet.getTotalWeightKg() / 1000.0)));
 
             Route route = buildRouteEntity(request, transportSet, createdByUsername, routeData);
             Route savedRoute = routeRepository.save(route);
@@ -141,12 +143,7 @@ public class RouteService {
     }
 
     /**
-     * ✅✅✅ NOWA GŁÓWNA METODA - INTELIGENTNE WYSZUKIWANIE TRASY ✅✅✅
-     *
-     * ALGORYTM:
-     * 1. Próba #1: Autostrady i drogi główne (optymalna trasa)
-     * 2. Próby #2-N: Wyszukiwanie alternatyw z omijaniem przeszkód
-     * 3. Ostateczność: Draft dla operatora
+     * ✅✅✅ GŁÓWNA METODA - INTELIGENTNE WYSZUKIWANIE TRASY ✅✅✅
      */
     private RouteResponse createHeavyVehicleRouteWithValidation(
             CreateRouteRequest request,
@@ -197,6 +194,8 @@ public class RouteService {
                 routeData.put("createdAt", LocalDateTime.now().toString());
                 routeData.put("initialGoogleRoute", initialGoogleRoute);
                 routeData.put("routeType", "OPTIMAL_HIGHWAY");
+                // P5 FIX: Dodaj uzasadnienie do RouteData
+                routeData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(transportSet.getTotalWeightKg() / 1000.0)));
 
                 return saveValidatedRoute(request, transportSet, createdByUsername, routeData);
             }
@@ -260,6 +259,7 @@ public class RouteService {
                     routeData.put("createdAt", LocalDateTime.now().toString());
                     routeData.put("initialGoogleRoute", initialGoogleRoute);
                     routeData.put("routeType", "ALTERNATIVE_SAFE");
+                    routeData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(transportSet.getTotalWeightKg() / 1000.0))); // P5 FIX
 
                     return saveValidatedRoute(request, transportSet, createdByUsername, routeData);
                 }
@@ -313,7 +313,6 @@ public class RouteService {
 
     /**
      * ✅ POPRAWIONA METODA - Zapisuje trasę jako DRAFT z problemami
-     * Teraz poprawnie rozbija błędy zbiorcze i pobiera szczegóły infrastruktury.
      */
     private RouteResponse saveDraftRouteWithProblems(
             CreateRouteRequest request,
@@ -342,32 +341,13 @@ public class RouteService {
                     }
 
                     if (allRejectedPointsSet.add(pointName)) { // Unikalność po nazwie
-                        Map<String, Object> rejectedPoint = new HashMap<>();
-                        rejectedPoint.put("name", pointName);
-                        rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
-
-                        // ✅ NOWOŚĆ: Dodaj szczegóły (nośność, wysokość)
-                        String reason = (String) infraPoint.getOrDefault("violation", "Przekroczone parametry");
-                        Double maxWeight = (Double) infraPoint.get("maxWeightTons");
-                        Double maxHeight = (Double) infraPoint.get("maxHeightMeters");
-
-                        StringBuilder reasonStr = new StringBuilder(reason);
-                        if (maxWeight != null) {
-                            reasonStr.append(String.format(" (Limit nośności: %.1ft)", maxWeight));
-                        }
-                        if (maxHeight != null) {
-                            reasonStr.append(String.format(" (Limit wysokości: %.2fm)", maxHeight));
-                        }
-
-                        rejectedPoint.put("reason", List.of(reasonStr.toString()));
-                        rejectedPoint.put("canBeAccepted", true);
-                        finalRejectedPointsDetails.add(rejectedPoint);
+                        // Użyj nowej metody do tworzenia szczegółowego punktu
+                        finalRejectedPointsDetails.add(createRejectedPointDetail(pointName, infraPoint, false));
                         log.info("   -> Dodano punkt (z Infrastruktury): {}", pointName);
                     }
                 }
             }
             // 2. Zbieramy KRYTYCZNE BŁĘDY WALIDACJI (gdy np. HERE Maps zwraca błąd)
-            // Ten kod działa jako fallback, gdy `problematicInfrastructure` jest puste
             else if (report.getViolations() != null && !report.getViolations().isEmpty()) {
 
                 for (String violation : report.getViolations()) {
@@ -384,12 +364,10 @@ public class RouteService {
 
                         for (String objectName : objects) {
                             if (allRejectedPointsSet.add(objectName)) { // Użyj nazwy obiektu jako klucza
-                                Map<String, Object> rejectedPoint = new HashMap<>();
-                                rejectedPoint.put("name", objectName); // ✅ Nazwa obiektu
-                                rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
-                                rejectedPoint.put("reason", List.of("Objazd niemożliwy, trasa prowadzi przez ten obiekt (wg HERE)")); // ✅ Powód
-                                rejectedPoint.put("canBeAccepted", true); // Można akceptować pojedynczo
-                                finalRejectedPointsDetails.add(rejectedPoint);
+                                Map<String, Object> infraPoint = new HashMap<>();
+                                infraPoint.put("violation", "Objazd niemożliwy, trasa prowadzi przez ten obiekt (wg HERE)");
+                                // Użyj nowej metody do tworzenia szczegółowego punktu (bez danych masy/wysokości)
+                                finalRejectedPointsDetails.add(createRejectedPointDetail(objectName, infraPoint, false));
                                 log.info("   -> Dodano punkt (z błędu zbiorczego): {}", objectName);
                             }
                         }
@@ -418,6 +396,7 @@ public class RouteService {
         routeData.put("rejectedPoints", finalRejectedPointsDetails); // Użyj nowej, pełnej listy
         routeData.put("requiresOperatorDecision", true);
         routeData.put("routeType", "DRAFT_REQUIRES_APPROVAL");
+        routeData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(transportSet.getTotalWeightKg() / 1000.0))); // P5 FIX
 
         List<String> operatorMessages = new ArrayList<>();
         operatorMessages.add("⚠️  TRASA NIEPRZEJEZDNA - wymaga decyzji operatora");
@@ -486,6 +465,7 @@ public class RouteService {
         route.setStatus(Route.RouteStatus.CREATED);
         route.setIsDraft(false);
         route.setHasValidationProblems(false); // Zaakceptowane problemy nie są już "problemami"
+        route.setRejectedPointsJson(null); // ✅ P2 FIX: Wyczyść listę odrzuconych punktów po akceptacji
 
         try {
             Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
@@ -654,6 +634,24 @@ public class RouteService {
         log.info("╚══════════════════════════════════════╝");
     }
 
+    private Map<String, Object> createTransportSetInfo(TransportSet transportSet) {
+        Map<String, Object> info = new HashMap<>();
+        info.put("id", transportSet.getId());
+        info.put("totalWeight_kg", transportSet.getTotalWeightKg());
+        info.put("totalHeight_cm", transportSet.getTotalHeightCm());
+        info.put("totalLength_cm", transportSet.getTotalLengthCm());
+        info.put("totalWidth_cm", transportSet.getTotalWidthCm());
+        info.put("trailerHeight_cm", transportSet.getTrailerHeightCm());
+        // Dodaj parametry, które są mapowane bezpośrednio z encji
+        info.put("weightTon", transportSet.getTotalWeightKg() / 1000.0);
+        info.put("heightM", transportSet.getTotalHeightCm() / 100.0);
+
+        info.put("description", transportSet.getDescription());
+        info.put("cargoHeight_cm", transportSet.getCargo().getHeightCm());
+        return info;
+    }
+
+
     /**
      * ✅ BUDUJE ENCJĘ ROUTE
      */
@@ -694,6 +692,7 @@ public class RouteService {
         }
 
         try {
+            routeData.put("transportSetInfo", createTransportSetInfo(transportSet)); // Dodaj szczegóły do JSON
             route.setRouteDataJson(objectMapper.writeValueAsString(routeData));
         } catch (Exception e) {
             log.error("❌ Błąd serializacji danych trasy", e);
@@ -789,7 +788,10 @@ public class RouteService {
         try {
             if (route.getRouteDataJson() != null) {
                 Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
-                response.setValidation((Map<String, Object>) routeData.get("validation"));
+
+                // ✅ P5 FIX: Ustaw validation na pełne dane (w tym justification)
+                response.setValidation(routeData);
+
                 response.setRouteData(routeData);
                 response.setOperatorMessages((List<String>) routeData.get("operatorMessages"));
             }
@@ -803,7 +805,9 @@ public class RouteService {
         }
 
         return response;
-    }// ═══════════════════════════════════════════════════════════════════════════
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // GENEROWANIE PLIKÓW NAWIGACYJNYCH (GPX/KML)
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1000,7 +1004,6 @@ public class RouteService {
                 .replace("'", "&apos;");
     }
 
-
     // ═══════════════════════════════════════════════════════════════════════════
     // ZARZĄDZANIE TRASAMI - CRUD I OPERACJE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1034,11 +1037,16 @@ public class RouteService {
                 transportInfo.put("totalWidth_cm", ts.getTotalWidthCm());
                 transportInfo.put("trailerHeight_cm", ts.getTrailerHeightCm());
                 transportInfo.put("cargoHeight_cm", ts.getCargo().getHeightCm());
+
+                // ✅ NOWE: Dodaj przeliczone wartości do transportInfo
+                transportInfo.put("weightTon", ts.getTotalWeightKg() / 1000.0);
+                transportInfo.put("heightM", ts.getTotalHeightCm() / 100.0);
+
                 details.put("transportSetInfo", transportInfo);
 
                 details.put("validationAvailable", true);
                 details.put("lightVehicle", routeData.getOrDefault("lightVehicle", false));
-                details.put("routeJustification", routeData.getOrDefault("routeJustification", new ArrayList<>()));
+                details.put("routeJustification", routeData.getOrDefault("routeJustification", new ArrayList<>())); // P5 FIX
 
             } else {
                 details.put("validationAvailable", false);
@@ -1292,7 +1300,7 @@ public class RouteService {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Nie znaleziono trasy"));
 
-        if (!route.getIsDraft() && !route.getHasValidationProblems()) {
+        if (!route.getIsDraft() || !route.getHasValidationProblems()) {
             throw new RuntimeException("Ta trasa nie wymaga przeglądu punktów");
         }
 
@@ -1334,7 +1342,6 @@ public class RouteService {
             PointDecisionDto decision = decisionMap.get(pointName);
 
             if (decision == null) {
-                // Jeśli brakuje decyzji dla punktu, traktujemy to jako odrzucenie dla bezpieczeństwa
                 log.warn("⚠️  Brak decyzji dla punktu: {}. Domyślnie odrzucam (REJECTED).", pointName);
                 rejectedPointsList.add(pointName);
                 continue;
@@ -1373,7 +1380,6 @@ public class RouteService {
         if (rejectedPointsList.isEmpty()) {
             // SCENARIUSZ 1: Wszystkie punkty zaakceptowane (REJECTED_LIST = 0)
             log.info("🎉 WSZYSTKIE PUNKTY ZAAKCEPTOWANE - akceptuję trasę");
-            // Uwaga: Komentarz w acceptRouteWithProblems nie jest używany, używamy tu stałego opisu
             return acceptRouteWithProblems(
                     routeId,
                     operatorUsername,
@@ -1433,6 +1439,9 @@ public class RouteService {
             newRouteData.put("acceptedPoints", acceptedPointNames);
             newRouteData.put("revalidatedAt", LocalDateTime.now().toString());
             newRouteData.put("originalRouteId", route.getId());
+            newRouteData.put("routeType", "REVALIDATED"); // Nowy typ
+            newRouteData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(route.getTransportSet().getTotalWeightKg() / 1000.0))); // P5 FIX
+
             route.setRouteDataJson(objectMapper.writeValueAsString(newRouteData));
 
 
@@ -1463,61 +1472,36 @@ public class RouteService {
                 log.warn("║  📋 Wymaga ponownego przeglądu przez operatora            ║");
                 log.warn("╚════════════════════════════════════════════════════════════╝");
 
-                // ✅✅✅ POCZĄTEK ZMODYFIKOWANEJ LOGIKI (Rewalidacja) ✅✅✅
+                // Przebuduj listę problemów na nowo
                 List<Map<String, Object>> newRejectedPoints = new ArrayList<>();
+                Set<String> newRejectedNames = new HashSet<>();
 
-                // Użyj nowej listy z pełnymi danymi
-                if (validationReport.getProblematicInfrastructure() != null && !validationReport.getProblematicInfrastructure().isEmpty()) {
+                // Zbieraj nowe problemy z infrastruktury (główne źródło)
+                if (validationReport.getProblematicInfrastructure() != null) {
                     for (Map<String, Object> infraPoint : validationReport.getProblematicInfrastructure()) {
                         String pointName = (String) infraPoint.get("name");
-                        if (pointName == null || pointName.isEmpty()) {
-                            pointName = "Nienazwany Obiekt";
+                        if (pointName != null && newRejectedNames.add(pointName)) {
+                            // Dodaj pełne szczegóły
+                            newRejectedPoints.add(createRejectedPointDetail(pointName, infraPoint, true));
                         }
-
-                        Map<String, Object> point = new HashMap<>();
-                        point.put("name", pointName);
-
-                        // Dodaj szczegóły (nośność, wysokość)
-                        String reason = (String) infraPoint.getOrDefault("violation", "Znaleziony podczas rewalidacji");
-                        Double maxWeight = (Double) infraPoint.get("maxWeightTons");
-                        Double maxHeight = (Double) infraPoint.get("maxHeightMeters");
-
-                        StringBuilder reasonStr = new StringBuilder(reason);
-                        if (maxWeight != null) {
-                            reasonStr.append(String.format(" (Limit nośności: %.1ft)", maxWeight));
-                        }
-                        if (maxHeight != null) {
-                            reasonStr.append(String.format(" (Limit wysokości: %.2fm)", maxHeight));
-                        }
-
-                        point.put("reason", List.of(reasonStr.toString()));
-                        point.put("foundDuringRevalidation", true);
-                        point.put("requiresReview", true);
-                        newRejectedPoints.add(point);
-                        log.warn("   🚫 Nowy problem: {} - {}", pointName, reasonStr.toString());
                     }
                 }
 
-                // Fallback dla błędów zbiorczych (tak jak w saveDraftRouteWithProblems)
-                if (newRejectedPoints.isEmpty() && validationReport.getViolations() != null && !validationReport.getViolations().isEmpty()) {
+                // Fallback: Dodaj błędy zbiorcze (jeśli się pojawiły)
+                if (newRejectedPoints.isEmpty() && validationReport.getViolations() != null) {
                     for (String violation : validationReport.getViolations()) {
                         String blockPrefix = "Wszystkie możliwe trasy przechodzą przez zablokowane obiekty:";
                         if (violation.startsWith(blockPrefix)) {
                             String objectListStr = violation.substring(blockPrefix.length()).trim();
                             String[] objects = objectListStr.split(",\\s*");
                             for (String objectName : objects) {
-                                Map<String, Object> point = new HashMap<>();
-                                point.put("name", objectName);
-                                point.put("reason", List.of("Objazd niemożliwy, trasa prowadzi przez ten obiekt (brak szczegółów)"));
-                                point.put("foundDuringRevalidation", true);
-                                point.put("requiresReview", true);
-                                newRejectedPoints.add(point);
-                                log.warn("   🚫 Nowy problem (zbiorczy): {}", objectName);
+                                if (newRejectedNames.add(objectName)) {
+                                    newRejectedPoints.add(createRejectedPointDetail(objectName, Map.of("violation", "Objazd niemożliwy (brak alternatywy HERE)"), true));
+                                }
                             }
                         }
                     }
                 }
-                // ✅✅✅ KONIEC ZMODYFIKOWANEJ LOGIKI (Rewalidacja) ✅✅✅
 
                 route.setRejectedPointsJson(objectMapper.writeValueAsString(newRejectedPoints));
                 route.setStatus(Route.RouteStatus.VALIDATION_REQUIRED);
@@ -1532,6 +1516,30 @@ public class RouteService {
             throw new RuntimeException("Błąd rewalidacji: " + e.getMessage());
         }
     }
+
+    private Map<String, Object> createRejectedPointDetail(String pointName, Map<String, Object> infraPoint, boolean isRevalidated) {
+        Map<String, Object> rejectedPoint = new HashMap<>();
+        rejectedPoint.put("name", pointName);
+        rejectedPoint.put("firstSeenAttempt", isRevalidated ? 100 : 1);
+
+        String reason = (String) infraPoint.getOrDefault("violation", "Przekroczone parametry");
+        Double maxWeight = (Double) infraPoint.get("maxWeightTons");
+        Double maxHeight = (Double) infraPoint.get("maxHeightMeters");
+
+        StringBuilder reasonStr = new StringBuilder(reason);
+        if (maxWeight != null) {
+            reasonStr.append(String.format(" (Limit nośności: %.1ft)", maxWeight));
+        }
+        if (maxHeight != null) {
+            reasonStr.append(String.format(" (Limit wysokości: %.2fm)", maxHeight));
+        }
+
+        rejectedPoint.put("reason", List.of(reasonStr.toString()));
+        rejectedPoint.put("canBeAccepted", true);
+        rejectedPoint.put("foundDuringRevalidation", isRevalidated);
+        return rejectedPoint;
+    }
+
 
     /**
      * ✅ KLASA DTO - Decyzja operatora dla pojedynczego punktu
