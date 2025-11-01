@@ -263,23 +263,85 @@ class OperatorDashboard {
         `;
     }
 
+    /**
+     * ✅ ZMODYFIKOWANA FUNKCJA RENDEROWANIA (dla wyświetlania limitów i domyślnego REJECT)
+     * Zgodna z poprawioną logiką backendu.
+     */
     renderRouteRequiringAcceptance(route) {
         let rejectedPointsHtml = '';
         if (route.rejectedPoints && route.rejectedPoints.length > 0) {
             rejectedPointsHtml = `
                 <div class="rejected-points mb-3">
                     <h6>Zidentyfikowane punkty problematyczne (${route.rejectedPoints.length}):</h6>
-                    <div class="list-group">
-                        ${route.rejectedPoints.map((point, idx) => `
-                            <div class="list-group-item">
-                                <input type="checkbox" id="point-${route.id}-${idx}" 
-                                       class="form-check-input me-2" 
-                                       value="${point.name || 'Unknown Point'}">
-                                <label for="point-${route.id}-${idx}">
-                                    ${point.name || 'Punkt bez nazwy'} - ${point.reason ? point.reason[0] : 'Brak powodu'}
-                                </label>
-                            </div>
-                        `).join('')}
+                    <div id="decision-list-${route.id}">
+                        ${route.rejectedPoints.map((point, idx) => {
+                // Wydobycie danych z tablicy "reason" (która w backendzie jest listą stringów)
+                const reasonArray = point.reason || [];
+                const mainReason = reasonArray.length > 0 ? reasonArray[0] : 'Brak szczegółowego powodu.';
+
+                // Dodanie formatowania dla limitów i przekroczeń (jeśli dane są obecne w stringu)
+                let detailsHtml = `<span class="text-danger">${escapeHtml(mainReason)}</span>`;
+
+                // Wyszukiwanie limitów w stringu (np. "(Limit nośności: 75.0t)")
+                const weightMatch = mainReason.match(/\(Limit nośności: ([\d.]+t)\)/);
+                const heightMatch = mainReason.match(/\(Limit wysokości: ([\d.]+m)\)/);
+
+                // Pobranie parametrów transportu (konieczne do porównania)
+                const transportWeight = route.routeData?.transportSet?.totalWeightTons;
+                const transportHeight = route.routeData?.transportSet?.totalHeightMeters;
+
+                let limitInfo = '';
+
+                if (weightMatch || heightMatch) {
+                    limitInfo += '<ul class="list-unstyled mt-2 mb-0" style="font-size:0.9em;">';
+
+                    if (weightMatch) {
+                        const limit = parseFloat(weightMatch[1].replace('t', ''));
+                        const actual = transportWeight ? transportWeight.toFixed(1) : 'N/A';
+                        const isViolation = transportWeight > limit;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Nośność:</strong> ${actual}t (Limit: ${weightMatch[1]}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                    }
+
+                    if (heightMatch) {
+                        const limit = parseFloat(heightMatch[1].replace('m', ''));
+                        const actual = transportHeight ? transportHeight.toFixed(2) : 'N/A';
+                        const isViolation = transportHeight > limit;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Wysokość:</strong> ${actual}m (Limit: ${heightMatch[1]}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                    }
+                    limitInfo += '</ul>';
+                }
+                // Koniec dodawania formatowania
+
+                return `
+                                <div class="rejected-point-item" data-point-name="${escapeHtml(point.name || 'Unknown Point')}">
+                                    <div class="point-details">
+                                        <strong>${escapeHtml(point.name || 'Punkt bez nazwy')}</strong>
+                                    </div>
+                                    <div class="point-reason">
+                                        ${detailsHtml}
+                                        ${limitInfo}
+                                    </div>
+                                    <div class="decision-radios">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="decision-${route.id}-${idx}" id="accept-${route.id}-${idx}" value="ACCEPTED">
+                                            <label class="form-check-label text-success" for="accept-${route.id}-${idx}">
+                                                ✅ Akceptuj
+                                            </label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="decision-${route.id}-${idx}" id="reject-${route.id}-${idx}" value="REJECTED" checked>
+                                            <label class="form-check-label text-danger" for="reject-${route.id}-${idx}">
+                                                ❌ Odrzuć (szukaj objazdu)
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <textarea id="comment-${route.id}-${idx}" class="form-control form-control-sm" rows="1"
+                                                  placeholder="Opcjonalny komentarz do punktu..."></textarea>
+                                    </div>
+                                </div>
+                            `;
+            }).join('')}
                     </div>
                 </div>
             `;
@@ -290,38 +352,110 @@ class OperatorDashboard {
             operatorMessagesHtml = `
                 <p class="text-danger mb-2"><strong>Problemy z walidacją:</strong></p>
                 <ul class="mb-3">
-                    ${route.operatorMessages.map(msg => `<li>${msg}</li>`).join('')}
+                    ${route.operatorMessages.map(msg => `<li>${escapeHtml(msg)}</li>`).join('')}
                 </ul>
             `;
         }
 
         return `
             <div class="card mb-3 border-warning">
-                <div class="card-body">
-                    <h6>Trasa #${route.id}: ${route.startAddress} → ${route.endAddress}</h6>
+                <div class="card-body" id="route-card-acceptance-${route.id}">
+                    <h6>Trasa #${route.id}: ${escapeHtml(route.startAddress)} → ${escapeHtml(route.endAddress)}</h6>
                     ${operatorMessagesHtml}
                     ${rejectedPointsHtml}
-                    <div class="form-group mb-3">
-                        <label for="comment-${route.id}"><strong>Komentarz operatora (wymagany):</strong></label>
-                        <textarea id="comment-${route.id}" class="form-control" rows="3"
-                                  placeholder="Wpisz uzasadnienie akceptacji... (min. 10 znaków)"></textarea>
-                    </div>
-                    <div class="btn-group">
-                        <button class="btn btn-warning" onclick="operatorDashboard.acceptRouteWithProblems(${route.id})">
-                            ✅ Akceptuj trasę
+                    
+                    <div class="btn-group mt-3">
+                        <button class="btn btn-warning" onclick="operatorDashboard.submitPointDecisions(${route.id})">
+                            Prześlij Decyzje
                         </button>
                         <button class="btn btn-info" onclick="showRouteOnMap(${route.id})">
                             🗺️ Pokaż na mapie
                         </button>
-                        <button class="btn btn-danger" onclick="operatorDashboard.deleteRoute(${route.id})">
-                            ❌ Odrzuć/Usuń trasę
-                        </button>
-                    </div>
+                        </div>
                 </div>
             </div>
         `;
     }
 
+    /**
+     * ✅ KLUCZOWA POPRAWKA LOGIKI: Zbiera indywidualne decyzje i wysyła je do backendu.
+     */
+    async submitPointDecisions(routeId) {
+        const card = document.getElementById(`route-card-acceptance-${routeId}`);
+        if (!card) return;
+
+        const decisions = [];
+        const pointItems = card.querySelectorAll('.rejected-point-item');
+
+        for (let i = 0; i < pointItems.length; i++) {
+            const item = pointItems[i];
+            const pointName = item.dataset.pointName;
+            const decisionInput = item.querySelector(`input[name="decision-${routeId}-${i}"]:checked`);
+            const comment = item.querySelector(`#comment-${routeId}-${i}`).value;
+
+            if (!decisionInput) {
+                this.showError("Musisz podjąć decyzję (Akceptuj/Odrzuć) dla każdego punktu.");
+                return;
+            }
+
+            decisions.push({
+                pointName: pointName,
+                decision: decisionInput.value,
+                comment: comment || ''
+            });
+        }
+
+        const hasRejections = decisions.some(d => d.decision === 'REJECTED');
+        const confirmationMessage = hasRejections ?
+            `Odrzucono ${decisions.filter(d => d.decision === 'REJECTED').length} pkt. System spróbuje znaleźć objazd. Kontynuować?` :
+            `Zaakceptowano wszystkie punkty. Trasa zostanie zatwierdzona. Kontynuować?`;
+
+        if (!confirm(confirmationMessage)) return;
+
+        try {
+            // Zablokuj przycisk
+            const button = card.querySelector('.btn-warning');
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Przetwarzanie...';
+
+            const response = await fetch(`/api/routes/${routeId}/review-points`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ decisions })
+            });
+
+            const result = await response.json();
+            if (!response.ok || result.success === false) {
+                throw new Error(result.error || 'Błąd przetwarzania decyzji');
+            }
+
+            // Backend zwróci informację o wyniku (ROUTE_ACCEPTED lub REQUIRES_REVIEW_AGAIN)
+            if (result.action === 'ROUTE_ACCEPTED') {
+                this.showSuccess(`✅ ${result.message || 'Trasa zaakceptowana pomyślnie'}`);
+            } else if (result.action === 'REQUIRES_REVIEW_AGAIN') {
+                this.showMessage(`⚠️ ${result.message || 'Rewalidacja znalazła nowe problemy'}`, 'warning', 15000);
+            } else {
+                this.showSuccess('Decyzje przetworzone.');
+            }
+
+            // Przeładuj obie listy
+            this.loadRoutesRequiringAcceptance();
+            this.loadAllRoutes();
+
+        } catch (error) {
+            this.showError('Błąd podczas przesyłania decyzji: ' + error.message);
+        } finally {
+            const button = card.querySelector('.btn-warning');
+            button.disabled = false;
+            button.innerHTML = 'Prześlij Decyzje';
+        }
+    }
+
+
+    /**
+     * Ta funkcja jest teraz wywoływana tylko przez backend, jeśli wszystkie punkty zostały zaakceptowane.
+     * Nie jest już bezpośrednio wywoływana z UI dla tras z problemami.
+     */
     async acceptRouteWithProblems(routeId) {
         const comment = document.getElementById(`comment-${routeId}`)?.value;
         if (!comment || comment.trim().length < 10) {
@@ -823,6 +957,8 @@ class OperatorDashboard {
             .then(response => {
                 if (!response.ok) throw new Error('Nie udało się usunąć trasy');
                 this.showSuccess('Trasa usunięta');
+
+                // ✅ POPRAWKA: Odświeżenie list po usunięciu
                 this.loadAllRoutes();
                 this.loadRoutesRequiringAcceptance();
             })

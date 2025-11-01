@@ -268,13 +268,18 @@ public class RouteService {
                 List<String> newCriticalBridges = attemptReport.getCriticalBridges();
 
                 if (newCriticalBridges.isEmpty()) {
-                    log.warn("⚠️  Google Maps nie znalazł więcej tras - przerywam pętlę");
+                    log.warn("⚠️  Google Maps nie znalazł więcej tras (lub wystąpił błąd walidacji) - przerywam pętlę");
                     break;
                 }
 
                 int beforeSize = excludedInfrastructure.size();
                 excludedInfrastructure.addAll(newCriticalBridges);
                 int addedCount = excludedInfrastructure.size() - beforeSize;
+
+                if (addedCount == 0) {
+                    log.warn("⚠️  Nie dodano nowych wykluczeń (pętla) - przerywam");
+                    break;
+                }
 
                 log.info("🚫 Wykluczam dodatkowo {} nowych obiektów", addedCount);
 
@@ -288,8 +293,6 @@ public class RouteService {
             }
         }
 
-        // ... wewnątrz metody createHeavyVehicleRouteWithValidation ...
-
         // ============================================================================
         // KROK 3: OSTATECZNA PORAŻKA - DRAFT DLA OPERATORA
         // ============================================================================
@@ -302,82 +305,130 @@ public class RouteService {
         log.warn("⚠️  Nie znaleziono w pełni przejezdnej trasy po {} próbach", allAttempts.size());
         log.warn("🚫 Łączna liczba zablokowanych obiektów: {}", excludedInfrastructure.size());
 
-        // Zbierz wszystkie unikalne punkty problematyczne
-        Set<String> allRejectedPointsSet = new HashSet<>();
-        List<Map<String, Object>> rejectedPointsDetails = new ArrayList<>();
-
-        // ✅ POPRAWKA: Zbieramy punkty problematyczne ze WSZYSTKICH prób
-        for (RouteAttemptReport report : allAttempts) {
-            // 1. Zbieramy BLOKUJĄCE MOSTY (jeśli są)
-            if (report.getCriticalBridges() != null && !report.getCriticalBridges().isEmpty()) {
-                for (String bridge : report.getCriticalBridges()) {
-                    if (allRejectedPointsSet.add(bridge)) { // <-- Tylko nazwy mostów
-                        Map<String, Object> rejectedPoint = new HashMap<>();
-                        rejectedPoint.put("name", bridge);
-                        rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
-                        List<String> reasons = report.getViolations() != null && !report.getViolations().isEmpty() ?
-                                report.getViolations() : List.of("Przekroczone parametry mostu");
-                        rejectedPoint.put("reason", reasons);
-                        rejectedPoint.put("canBeAccepted", true); // Mosty można akceptować
-                        rejectedPointsDetails.add(rejectedPoint);
-                    }
-                }
-            }
-            // 2. Zbieramy BŁĘDY WALIDACJI (np. z HERE), jeśli nie ma mostów
-            else if (report.getViolations() != null && !report.getViolations().isEmpty()) {
-                // To jest błąd na poziomie trasy, nie punktu (np. HERE zablokował)
-                String reasonKey = String.join(", ", report.getViolations());
-                if (allRejectedPointsSet.add(reasonKey)) { // <-- Użyj błędu jako klucza
-                    Map<String, Object> rejectedPoint = new HashMap<>();
-                    rejectedPoint.put("name", "Błąd walidacji trasy (np. HERE Maps)");
-                    rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
-                    rejectedPoint.put("reason", report.getViolations());
-                    // Błędu walidacji całej trasy nie można "zaakceptować" punktowo
-                    // Operator musi albo zaakceptować całą trasę mimo wszystko, albo ją odrzucić.
-                    rejectedPoint.put("canBeAccepted", true);
-                    rejectedPointsDetails.add(rejectedPoint);
-                }
-            }
-        }
-
-        log.info("📊 Znaleziono {} unikalnych punktów problematycznych", rejectedPointsDetails.size());
-
         return saveDraftRouteWithProblems(
                 request, transportSet, createdByUsername,
-                initialGoogleRoute, allAttempts, rejectedPointsDetails
+                initialGoogleRoute, allAttempts
         );
     }
 
     /**
-     * ✅ NOWA METODA - Zapisuje trasę jako DRAFT z problemami
+     * ✅ POPRAWIONA METODA - Zapisuje trasę jako DRAFT z problemami
+     * Teraz poprawnie rozbija błędy zbiorcze i pobiera szczegóły infrastruktury.
      */
     private RouteResponse saveDraftRouteWithProblems(
             CreateRouteRequest request,
             TransportSet transportSet,
             String createdByUsername,
             Map<String, Object> initialGoogleRoute,
-            List<RouteAttemptReport> allAttempts,
-            List<Map<String, Object>> rejectedPoints) {
+            List<RouteAttemptReport> allAttempts) {
 
         Map<String, Object> routeData = new HashMap<>(initialGoogleRoute);
+
+        // Ta lista będzie zawierać ostateczne, unikalne punkty do przeglądu
+        List<Map<String, Object>> finalRejectedPointsDetails = new ArrayList<>();
+        Set<String> allRejectedPointsSet = new HashSet<>(); // Unikalność po nazwie
+
+        log.info("📊 Rozpoczynam zbieranie punktów problematycznych ze wszystkich {} prób...", allAttempts.size());
+
+        // ✅✅✅ POCZĄTEK ZMODYFIKOWANEJ LOGIKI ✅✅✅
+        for (RouteAttemptReport report : allAttempts) {
+
+            // 1. Zbieramy BLOKUJĄCE PUNKTY (z pełnymi danymi z `problematicInfrastructure`)
+            if (report.getProblematicInfrastructure() != null && !report.getProblematicInfrastructure().isEmpty()) {
+                for (Map<String, Object> infraPoint : report.getProblematicInfrastructure()) {
+                    String pointName = (String) infraPoint.get("name");
+                    if (pointName == null || pointName.isEmpty()) {
+                        pointName = "Nienazwany Obiekt";
+                    }
+
+                    if (allRejectedPointsSet.add(pointName)) { // Unikalność po nazwie
+                        Map<String, Object> rejectedPoint = new HashMap<>();
+                        rejectedPoint.put("name", pointName);
+                        rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
+
+                        // ✅ NOWOŚĆ: Dodaj szczegóły (nośność, wysokość)
+                        String reason = (String) infraPoint.getOrDefault("violation", "Przekroczone parametry");
+                        Double maxWeight = (Double) infraPoint.get("maxWeightTons");
+                        Double maxHeight = (Double) infraPoint.get("maxHeightMeters");
+
+                        StringBuilder reasonStr = new StringBuilder(reason);
+                        if (maxWeight != null) {
+                            reasonStr.append(String.format(" (Limit nośności: %.1ft)", maxWeight));
+                        }
+                        if (maxHeight != null) {
+                            reasonStr.append(String.format(" (Limit wysokości: %.2fm)", maxHeight));
+                        }
+
+                        rejectedPoint.put("reason", List.of(reasonStr.toString()));
+                        rejectedPoint.put("canBeAccepted", true);
+                        finalRejectedPointsDetails.add(rejectedPoint);
+                        log.info("   -> Dodano punkt (z Infrastruktury): {}", pointName);
+                    }
+                }
+            }
+            // 2. Zbieramy KRYTYCZNE BŁĘDY WALIDACJI (gdy np. HERE Maps zwraca błąd)
+            // Ten kod działa jako fallback, gdy `problematicInfrastructure` jest puste
+            else if (report.getViolations() != null && !report.getViolations().isEmpty()) {
+
+                for (String violation : report.getViolations()) {
+
+                    // ✅ KLUCZOWA ZMIANA: Rozpoznaj i rozbij błąd zbiorczy
+                    String blockPrefix = "Wszystkie możliwe trasy przechodzą przez zablokowane obiekty:";
+                    if (violation.startsWith(blockPrefix)) {
+
+                        log.warn("Wykryto błąd zbiorczy - rozbijam na pojedyncze punkty... (Brak szczegółów nośności)");
+
+                        // Ekstrahuj listę po dwukropku
+                        String objectListStr = violation.substring(blockPrefix.length()).trim();
+                        String[] objects = objectListStr.split(",\\s*"); // Rozdziel po ", "
+
+                        for (String objectName : objects) {
+                            if (allRejectedPointsSet.add(objectName)) { // Użyj nazwy obiektu jako klucza
+                                Map<String, Object> rejectedPoint = new HashMap<>();
+                                rejectedPoint.put("name", objectName); // ✅ Nazwa obiektu
+                                rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
+                                rejectedPoint.put("reason", List.of("Objazd niemożliwy, trasa prowadzi przez ten obiekt (wg HERE)")); // ✅ Powód
+                                rejectedPoint.put("canBeAccepted", true); // Można akceptować pojedynczo
+                                finalRejectedPointsDetails.add(rejectedPoint);
+                                log.info("   -> Dodano punkt (z błędu zbiorczego): {}", objectName);
+                            }
+                        }
+                    } else {
+                        // Stara logika dla innych, pojedynczych błędów
+                        if (allRejectedPointsSet.add(violation)) { // Użyj błędu jako klucza
+                            Map<String, Object> rejectedPoint = new HashMap<>();
+                            rejectedPoint.put("name", "Błąd walidacji trasy");
+                            rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
+                            rejectedPoint.put("reason", List.of(violation));
+                            rejectedPoint.put("canBeAccepted", true);
+                            finalRejectedPointsDetails.add(rejectedPoint);
+                            log.info("   -> Dodano punkt (Błąd ogólny): {}", violation);
+                        }
+                    }
+                }
+            }
+        }
+        // ✅✅✅ KONIEC ZMODYFIKOWANEJ LOGIKI ✅✅✅
+
+        log.info("📊 Znaleziono {} unikalnych punktów problematycznych", finalRejectedPointsDetails.size());
 
         routeData.put("isDraft", true);
         routeData.put("hasValidationProblems", true);
         routeData.put("attemptReports", allAttempts);
-        routeData.put("rejectedPoints", rejectedPoints);
+        routeData.put("rejectedPoints", finalRejectedPointsDetails); // Użyj nowej, pełnej listy
         routeData.put("requiresOperatorDecision", true);
         routeData.put("routeType", "DRAFT_REQUIRES_APPROVAL");
 
         List<String> operatorMessages = new ArrayList<>();
         operatorMessages.add("⚠️  TRASA NIEPRZEJEZDNA - wymaga decyzji operatora");
         operatorMessages.add(String.format("System wykonał %d prób znalezienia bezpiecznej trasy", allAttempts.size()));
-        operatorMessages.add(String.format("Znaleziono %d punktów problematycznych", rejectedPoints.size()));
+        operatorMessages.add(String.format("Znaleziono %d unikalnych punktów problematycznych", finalRejectedPointsDetails.size()));
 
-        if (!rejectedPoints.isEmpty()) {
+        if (!finalRejectedPointsDetails.isEmpty()) {
             operatorMessages.add("");
             operatorMessages.add("📋 PUNKTY DO PRZEGLĄDU:");
-            for (Map<String, Object> point : rejectedPoints) {
-                operatorMessages.add(String.format("  • %s (próba #%d)",
+            for (Map<String, Object> point : finalRejectedPointsDetails) {
+                operatorMessages.add(String.format("  • %s (wykryto w próbie #%d)",
                         point.get("name"),
                         point.get("firstSeenAttempt")));
             }
@@ -385,10 +436,9 @@ public class RouteService {
 
         operatorMessages.add("");
         operatorMessages.add("💡 OPCJE OPERATORA:");
-        operatorMessages.add("  1️⃣  Zaakceptuj trasę mimo problemów (na własną odpowiedzialność)");
-        operatorMessages.add("  2️⃣  Zmień zestaw transportowy na lżejszy");
-        operatorMessages.add("  3️⃣  Wybierz inną trasę start/koniec");
-        operatorMessages.add("  4️⃣  Odrzuć i usuń tę trasę");
+        operatorMessages.add("  1️⃣  Przejrzyj każdy punkt i zdecyduj [Akceptuj] / [Odrzuć]");
+        operatorMessages.add("  2️⃣  Jeśli odrzucisz choć 1 punkt, system poszuka dla niego objazdu");
+        operatorMessages.add("  3️⃣  Jeśli zaakceptujesz wszystkie, trasa zostanie zatwierdzona");
 
         routeData.put("operatorMessages", operatorMessages);
 
@@ -398,7 +448,8 @@ public class RouteService {
         route.setHasValidationProblems(true);
 
         try {
-            String rejectedPointsJson = objectMapper.writeValueAsString(rejectedPoints);
+            // Użyj nowej, pełnej listy
+            String rejectedPointsJson = objectMapper.writeValueAsString(finalRejectedPointsDetails);
             route.setRejectedPointsJson(rejectedPointsJson);
         } catch (Exception e) {
             log.error("Błąd serializacji rejected points", e);
@@ -414,6 +465,7 @@ public class RouteService {
 
         return convertToResponse(savedRoute, routeData);
     }
+
     /**
      * ✅ NOWA METODA - Akceptacja trasy przez operatora
      */
@@ -422,8 +474,9 @@ public class RouteService {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Nie znaleziono trasy"));
 
-        if (!route.getIsDraft() || !route.getHasValidationProblems()) {
-            throw new RuntimeException("Ta trasa nie wymaga akceptacji operatora");
+        if (!route.getIsDraft() && !route.getHasValidationProblems()) {
+            // Pozwól na akceptację nawet jeśli nie jest draftem (np. ponowna akceptacja)
+            log.warn("Operator {} akceptuje trasę #{} która nie jest oznaczona jako draft", operatorUsername, routeId);
         }
 
         route.setOperatorAccepted(true);
@@ -432,6 +485,7 @@ public class RouteService {
         route.setOperatorComment(comment);
         route.setStatus(Route.RouteStatus.CREATED);
         route.setIsDraft(false);
+        route.setHasValidationProblems(false); // Zaakceptowane problemy nie są już "problemami"
 
         try {
             Map<String, Object> routeData = objectMapper.readValue(route.getRouteDataJson(), Map.class);
@@ -440,11 +494,15 @@ public class RouteService {
             routeData.put("operatorAcceptedAt", LocalDateTime.now().toString());
             routeData.put("operatorComment", comment);
             routeData.put("acceptedPoints", acceptedPoints);
+            routeData.put("hasValidationProblems", false); // Zaktualizuj status w JSON
 
             List<String> driverWarnings = new ArrayList<>();
             driverWarnings.add("⚠️  UWAGA: Trasa zaakceptowana przez operatora mimo ograniczeń");
             driverWarnings.add("Operator: " + operatorUsername);
             driverWarnings.add("Komentarz: " + comment);
+            if (acceptedPoints != null && !acceptedPoints.isEmpty()) {
+                driverWarnings.add("Zaakceptowane punkty: " + String.join(", ", acceptedPoints));
+            }
             driverWarnings.add("Zachowaj szczególną ostrożność podczas przejazdu");
             routeData.put("driverWarnings", driverWarnings);
 
@@ -463,16 +521,17 @@ public class RouteService {
      * ✅ NOWA METODA - Pobieranie tras wymagających akceptacji
      */
     public List<RouteResponse> getRoutesRequiringAcceptance() {
-        List<Route> draftRoutes = routeRepository.findByStatusAndIsDraft(
-                Route.RouteStatus.VALIDATION_REQUIRED, true);
+        // Znajdź trasy, które są draftami LUB mają problemy, ale nie są jeszcze zaakceptowane
+        List<Route> routesToAccept = routeRepository.findRoutesRequiringAcceptance();
 
-        return draftRoutes.stream()
+        return routesToAccept.stream()
                 .map(this::convertToResponseFromEntity)
                 .collect(Collectors.toList());
     }
 
     /**
-     * ✅ WALIDACJA TRASY PRZED ZAPISEM
+     * ✅ POPRAWIONA - WALIDACJA TRASY PRZED ZAPISEM
+     * Teraz zapisuje `problematicInfrastructure` zamiast `criticalBridges`
      */
     private RouteAttemptReport validateRouteBeforeSaving(
             Map<String, Object> routeData,
@@ -490,20 +549,9 @@ public class RouteService {
             report.setPassable(false);
             report.setViolations(List.of(blockReason));
             report.setBlockedBridges(999);
-            report.setCriticalBridges(List.of());
+            report.setCriticalBridges(List.of()); // Pusta lista
+            report.setProblematicInfrastructure(new ArrayList<>()); // Pusta lista
             report.setSuccessScore(0);
-            return report;
-        }
-
-        if (Boolean.TRUE.equals(routeData.get("requiresPermit"))) {
-            List<String> permits = (List<String>) routeData.getOrDefault("permits", new ArrayList<>());
-            log.info("⚠️  Trasa wymaga pozwolenia w próbie #{}: {}", attemptNumber, permits);
-            report.setPassable(true);
-            report.setRequiresPermit(true);
-            report.setPermits(permits);
-            report.setBlockedBridges(0);
-            report.setCriticalBridges(new ArrayList<>());
-            report.setSuccessScore(90);
             return report;
         }
 
@@ -518,20 +566,25 @@ public class RouteService {
         report.setPermits(permits);
         report.setTotalInfrastructureChecked(infrastructure.size());
 
-        long blockedBridges = infrastructure.stream()
+        // ✅ ZMODYFIKOWANA LOGIKA
+        // Zapisz pełne dane o problematycznej infrastrukturze
+        List<Map<String, Object>> problematicInfrastructure = infrastructure.stream()
                 .filter(i -> Boolean.FALSE.equals(i.get("canPass")))
-                .count();
+                .collect(Collectors.toList());
+        report.setProblematicInfrastructure(problematicInfrastructure);
+
+        // Zapisz tylko nazwy dla starszej logiki (np. pętli wykluczeń)
+        List<String> criticalBridges = problematicInfrastructure.stream()
+                .map(i -> (String) i.get("name"))
+                .collect(Collectors.toList());
+        report.setCriticalBridges(criticalBridges);
+
+        long blockedBridges = problematicInfrastructure.size();
+        // ✅ KONIEC MODYFIKACJI
 
         report.setBlockedBridges((int) blockedBridges);
         report.setPassable(violations.isEmpty() && blockedBridges == 0);
         report.setRequiresPermit(!permits.isEmpty());
-
-        List<String> criticalBridges = infrastructure.stream()
-                .filter(i -> Boolean.FALSE.equals(i.get("canPass")))
-                .map(i -> (String) i.get("name"))
-                .limit(100)
-                .collect(Collectors.toList());
-        report.setCriticalBridges(criticalBridges);
 
         double successScore = calculateAttemptScore(report, transportSet);
         report.setSuccessScore(successScore);
@@ -635,6 +688,10 @@ public class RouteService {
         Boolean hasProblems = (Boolean) routeData.getOrDefault("hasValidationProblems", false);
         route.setHasValidationProblems(hasProblems);
         route.setIsDraft((Boolean) routeData.getOrDefault("isDraft", false));
+
+        if (route.getIsDraft() || route.getHasValidationProblems()) {
+            route.setStatus(Route.RouteStatus.VALIDATION_REQUIRED);
+        }
 
         try {
             route.setRouteDataJson(objectMapper.writeValueAsString(routeData));
@@ -936,8 +993,13 @@ public class RouteService {
 
     private String escapeXml(String text) {
         if (text == null) return "";
-        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;");
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ZARZĄDZANIE TRASAMI - CRUD I OPERACJE
@@ -961,9 +1023,29 @@ public class RouteService {
                 details.put("infrastructureDetails", routeData.getOrDefault("infrastructureDetails", new ArrayList<>()));
                 details.put("attemptReports", routeData.getOrDefault("attemptReports", new ArrayList<>()));
                 details.put("searchAttempts", routeData.getOrDefault("searchAttempts", 1));
+
+                // Dodaj informacje o zestawie
+                Map<String, Object> transportInfo = new HashMap<>();
+                TransportSet ts = route.getTransportSet();
+                transportInfo.put("description", ts.getDescription());
+                transportInfo.put("totalWeight_kg", ts.getTotalWeightKg());
+                transportInfo.put("totalHeight_cm", ts.getTotalHeightCm());
+                transportInfo.put("totalLength_cm", ts.getTotalLengthCm());
+                transportInfo.put("totalWidth_cm", ts.getTotalWidthCm());
+                transportInfo.put("trailerHeight_cm", ts.getTrailerHeightCm());
+                transportInfo.put("cargoHeight_cm", ts.getCargo().getHeightCm());
+                details.put("transportSetInfo", transportInfo);
+
+                details.put("validationAvailable", true);
+                details.put("lightVehicle", routeData.getOrDefault("lightVehicle", false));
+                details.put("routeJustification", routeData.getOrDefault("routeJustification", new ArrayList<>()));
+
+            } else {
+                details.put("validationAvailable", false);
             }
         } catch (Exception e) {
             log.error("Error parsing validation details", e);
+            details.put("validationAvailable", false);
         }
         return details;
     }
@@ -1151,13 +1233,17 @@ public class RouteService {
         private List<String> permits = new ArrayList<>();
         private int blockedBridges;
         private List<String> criticalBridges = new ArrayList<>();
+
+        // ✅ ZMIANA: Przechowuje pełne dane o problemach, a nie tylko nazwy
+        private List<Map<String, Object>> problematicInfrastructure = new ArrayList<>();
+
         private int totalInfrastructureChecked;
         private double successScore;
         private String error;
-        private boolean preferredHighways; // ✅ NOWE POLE
+        private boolean preferredHighways;
 
         public boolean isFullyPassable() {
-            return passable && violations.isEmpty();
+            return passable && violations.isEmpty() && problematicInfrastructure.isEmpty();
         }
 
 
@@ -1188,18 +1274,17 @@ public class RouteService {
         public void setError(String error) { this.error = error; }
         public boolean isPreferredHighways() { return preferredHighways; }
         public void setPreferredHighways(boolean preferredHighways) { this.preferredHighways = preferredHighways; }
+
+        // ✅ NOWE Gettery/Settery
+        public List<Map<String, Object>> getProblematicInfrastructure() { return problematicInfrastructure; }
+        public void setProblematicInfrastructure(List<Map<String, Object>> problematicInfrastructure) { this.problematicInfrastructure = problematicInfrastructure; }
     }
     // ═══════════════════════════════════════════════════════════════════════════
     // ✅ NOWE METODY - PUNKTOWA AKCEPTACJA I REWALIDACJA
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * ✅ NOWA METODA: Przegląd punktów problematycznych przez operatora
-     *
-     * FLOW:
-     * 1. Operator przegląda każdy punkt osobno i decyduje: ACCEPT lub REJECT
-     * 2. Jeśli wszystkie ACCEPT → zaakceptuj trasę
-     * 3. Jeśli są REJECT → uruchom rewalidację z wykluczeniami
+     * ✅ KLUCZOWA POPRAWKA: GŁÓWNA METODA OBSŁUGI DECYZJI OPERATORA
      */
     public RouteResponse reviewRejectedPointsByOperator(Long routeId,
                                                         List<PointDecisionDto> decisions,
@@ -1207,9 +1292,10 @@ public class RouteService {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RuntimeException("Nie znaleziono trasy"));
 
-        if (!route.getIsDraft() || !route.getHasValidationProblems()) {
+        if (!route.getIsDraft() && !route.getHasValidationProblems()) {
             throw new RuntimeException("Ta trasa nie wymaga przeglądu punktów");
         }
+
 
         log.info("╔════════════════════════════════════════════════════════════╗");
         log.info("║  Operator {} przegląda {} punktów dla trasy {}           ",
@@ -1248,7 +1334,9 @@ public class RouteService {
             PointDecisionDto decision = decisionMap.get(pointName);
 
             if (decision == null) {
-                log.warn("⚠️  Brak decyzji dla punktu: {}", pointName);
+                // Jeśli brakuje decyzji dla punktu, traktujemy to jako odrzucenie dla bezpieczeństwa
+                log.warn("⚠️  Brak decyzji dla punktu: {}. Domyślnie odrzucam (REJECTED).", pointName);
+                rejectedPointsList.add(pointName);
                 continue;
             }
 
@@ -1270,7 +1358,7 @@ public class RouteService {
             }
         }
 
-        // Zapisz zaktualizowane punkty
+        // Zapisz zaktualizowane punkty (z decyzjami)
         try {
             route.setRejectedPointsJson(objectMapper.writeValueAsString(rejectedPoints));
         } catch (Exception e) {
@@ -1283,17 +1371,18 @@ public class RouteService {
 
         // Decyzja o dalszych krokach
         if (rejectedPointsList.isEmpty()) {
-            // SCENARIUSZ 1: Wszystkie punkty zaakceptowane
+            // SCENARIUSZ 1: Wszystkie punkty zaakceptowane (REJECTED_LIST = 0)
             log.info("🎉 WSZYSTKIE PUNKTY ZAAKCEPTOWANE - akceptuję trasę");
+            // Uwaga: Komentarz w acceptRouteWithProblems nie jest używany, używamy tu stałego opisu
             return acceptRouteWithProblems(
                     routeId,
                     operatorUsername,
-                    "Wszystkie punkty zaakceptowane przez operatora",
+                    "Wszystkie punkty problematyczne zaakceptowane przez operatora",
                     acceptedPoints
             );
 
         } else {
-            // SCENARIUSZ 2: Są punkty odrzucone - uruchom rewalidację
+            // SCENARIUSZ 2: Są punkty odrzucone (REJECTED_LIST > 0)
             log.info("🔄 ROZPOCZYNAM REWALIDACJĘ - {} punktów odrzuconych", rejectedPointsList.size());
             return revalidateRouteWithExclusions(route, rejectedPointsList, acceptedPoints, operatorUsername);
         }
@@ -1337,20 +1426,22 @@ public class RouteService {
                     route.getTransportSet()
             );
 
+            // Zapisz dane trasy niezależnie od wyniku
+            newRouteData.put("revalidated", true);
+            newRouteData.put("revalidatedBy", operatorUsername);
+            newRouteData.put("excludedPoints", excludedPointNames);
+            newRouteData.put("acceptedPoints", acceptedPointNames);
+            newRouteData.put("revalidatedAt", LocalDateTime.now().toString());
+            newRouteData.put("originalRouteId", route.getId());
+            route.setRouteDataJson(objectMapper.writeValueAsString(newRouteData));
+
+
             if (validationReport.isFullyPassable()) {
                 // ✅ SUKCES: Nowa trasa jest bezpieczna
                 log.info("╔════════════════════════════════════════════════════════════╗");
                 log.info("║  ✅ SUKCES! Znaleziono bezpieczną trasę alternatywną      ║");
                 log.info("╚════════════════════════════════════════════════════════════╝");
 
-                newRouteData.put("revalidated", true);
-                newRouteData.put("revalidatedBy", operatorUsername);
-                newRouteData.put("excludedPoints", excludedPointNames);
-                newRouteData.put("acceptedPoints", acceptedPointNames);
-                newRouteData.put("revalidatedAt", LocalDateTime.now().toString());
-                newRouteData.put("originalRouteId", route.getId());
-
-                route.setRouteDataJson(objectMapper.writeValueAsString(newRouteData));
                 route.setStatus(Route.RouteStatus.CREATED);
                 route.setIsDraft(false);
                 route.setHasValidationProblems(false);
@@ -1358,6 +1449,7 @@ public class RouteService {
                 route.setOperatorAcceptedBy(operatorUsername);
                 route.setOperatorAcceptedAt(LocalDateTime.now());
                 route.setOperatorComment("Trasa zrewalidowana - odrzucone punkty ominięte");
+                route.setRejectedPointsJson(null); // Wyczyść stare problemy
 
                 Route savedRoute = routeRepository.save(route);
                 log.info("✅ Trasa #{} zaakceptowana po rewalidacji", route.getId());
@@ -1371,16 +1463,61 @@ public class RouteService {
                 log.warn("║  📋 Wymaga ponownego przeglądu przez operatora            ║");
                 log.warn("╚════════════════════════════════════════════════════════════╝");
 
+                // ✅✅✅ POCZĄTEK ZMODYFIKOWANEJ LOGIKI (Rewalidacja) ✅✅✅
                 List<Map<String, Object>> newRejectedPoints = new ArrayList<>();
-                for (String criticalBridge : validationReport.getCriticalBridges()) {
-                    Map<String, Object> point = new HashMap<>();
-                    point.put("name", criticalBridge);
-                    point.put("reason", "Znaleziony podczas rewalidacji");
-                    point.put("foundDuringRevalidation", true);
-                    point.put("requiresReview", true);
-                    newRejectedPoints.add(point);
-                    log.warn("   🚫 Nowy problem: {}", criticalBridge);
+
+                // Użyj nowej listy z pełnymi danymi
+                if (validationReport.getProblematicInfrastructure() != null && !validationReport.getProblematicInfrastructure().isEmpty()) {
+                    for (Map<String, Object> infraPoint : validationReport.getProblematicInfrastructure()) {
+                        String pointName = (String) infraPoint.get("name");
+                        if (pointName == null || pointName.isEmpty()) {
+                            pointName = "Nienazwany Obiekt";
+                        }
+
+                        Map<String, Object> point = new HashMap<>();
+                        point.put("name", pointName);
+
+                        // Dodaj szczegóły (nośność, wysokość)
+                        String reason = (String) infraPoint.getOrDefault("violation", "Znaleziony podczas rewalidacji");
+                        Double maxWeight = (Double) infraPoint.get("maxWeightTons");
+                        Double maxHeight = (Double) infraPoint.get("maxHeightMeters");
+
+                        StringBuilder reasonStr = new StringBuilder(reason);
+                        if (maxWeight != null) {
+                            reasonStr.append(String.format(" (Limit nośności: %.1ft)", maxWeight));
+                        }
+                        if (maxHeight != null) {
+                            reasonStr.append(String.format(" (Limit wysokości: %.2fm)", maxHeight));
+                        }
+
+                        point.put("reason", List.of(reasonStr.toString()));
+                        point.put("foundDuringRevalidation", true);
+                        point.put("requiresReview", true);
+                        newRejectedPoints.add(point);
+                        log.warn("   🚫 Nowy problem: {} - {}", pointName, reasonStr.toString());
+                    }
                 }
+
+                // Fallback dla błędów zbiorczych (tak jak w saveDraftRouteWithProblems)
+                if (newRejectedPoints.isEmpty() && validationReport.getViolations() != null && !validationReport.getViolations().isEmpty()) {
+                    for (String violation : validationReport.getViolations()) {
+                        String blockPrefix = "Wszystkie możliwe trasy przechodzą przez zablokowane obiekty:";
+                        if (violation.startsWith(blockPrefix)) {
+                            String objectListStr = violation.substring(blockPrefix.length()).trim();
+                            String[] objects = objectListStr.split(",\\s*");
+                            for (String objectName : objects) {
+                                Map<String, Object> point = new HashMap<>();
+                                point.put("name", objectName);
+                                point.put("reason", List.of("Objazd niemożliwy, trasa prowadzi przez ten obiekt (brak szczegółów)"));
+                                point.put("foundDuringRevalidation", true);
+                                point.put("requiresReview", true);
+                                newRejectedPoints.add(point);
+                                log.warn("   🚫 Nowy problem (zbiorczy): {}", objectName);
+                            }
+                        }
+                    }
+                }
+                // ✅✅✅ KONIEC ZMODYFIKOWANEJ LOGIKI (Rewalidacja) ✅✅✅
 
                 route.setRejectedPointsJson(objectMapper.writeValueAsString(newRejectedPoints));
                 route.setStatus(Route.RouteStatus.VALIDATION_REQUIRED);
