@@ -265,10 +265,19 @@ class OperatorDashboard {
 
     /**
      * ✅ ZMODYFIKOWANA FUNKCJA RENDEROWANIA (dla wyświetlania limitów i domyślnego REJECT)
-     * Zgodna z poprawioną logiką backendu.
+     * Używa poprawnej logiki parsowania szczegółów walidacji.
      */
     renderRouteRequiringAcceptance(route) {
         let rejectedPointsHtml = '';
+
+        // Wyodrębnij parametry transportu z routeData dla porównania w UI
+        const validationDetails = route.routeData?.validation;
+        // W najnowszej wersji back-endu, transportInfo jest bezpośrednio w routeData
+        const transportInfo = route.routeData?.transportSetInfo || {};
+        const transportWeightTons = transportInfo.weightTon;
+        const transportHeightMeters = transportInfo.heightM;
+
+
         if (route.rejectedPoints && route.rejectedPoints.length > 0) {
             rejectedPointsHtml = `
                 <div class="rejected-points mb-3">
@@ -279,16 +288,12 @@ class OperatorDashboard {
                 const reasonArray = point.reason || [];
                 const mainReason = reasonArray.length > 0 ? reasonArray[0] : 'Brak szczegółowego powodu.';
 
-                // Dodanie formatowania dla limitów i przekroczeń (jeśli dane są obecne w stringu)
-                let detailsHtml = `<span class="text-danger">${escapeHtml(mainReason)}</span>`;
+                // Podstawowa przyczyna (np. Przekroczenie masy)
+                let detailsHtml = `<span class="text-danger"><strong>Powód:</strong> ${escapeHtml(mainReason.split(' (Limit')[0] || mainReason)}</span>`;
 
                 // Wyszukiwanie limitów w stringu (np. "(Limit nośności: 75.0t)")
                 const weightMatch = mainReason.match(/\(Limit nośności: ([\d.]+t)\)/);
                 const heightMatch = mainReason.match(/\(Limit wysokości: ([\d.]+m)\)/);
-
-                // Pobranie parametrów transportu (konieczne do porównania)
-                const transportWeight = route.routeData?.transportSet?.totalWeightTons;
-                const transportHeight = route.routeData?.transportSet?.totalHeightMeters;
 
                 let limitInfo = '';
 
@@ -296,17 +301,19 @@ class OperatorDashboard {
                     limitInfo += '<ul class="list-unstyled mt-2 mb-0" style="font-size:0.9em;">';
 
                     if (weightMatch) {
-                        const limit = parseFloat(weightMatch[1].replace('t', ''));
-                        const actual = transportWeight ? transportWeight.toFixed(1) : 'N/A';
-                        const isViolation = transportWeight > limit;
-                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Nośność:</strong> ${actual}t (Limit: ${weightMatch[1]}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                        const limitStr = weightMatch[1];
+                        const limit = parseFloat(limitStr.replace('t', ''));
+                        const actual = transportWeightTons ? transportWeightTons.toFixed(1) : 'N/A';
+                        const isViolation = transportWeightTons > limit;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Nośność:</strong> ${actual}t (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
                     }
 
                     if (heightMatch) {
-                        const limit = parseFloat(heightMatch[1].replace('m', ''));
-                        const actual = transportHeight ? transportHeight.toFixed(2) : 'N/A';
-                        const isViolation = transportHeight > limit;
-                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Wysokość:</strong> ${actual}m (Limit: ${heightMatch[1]}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                        const limitStr = heightMatch[1];
+                        const limit = parseFloat(limitStr.replace('m', ''));
+                        const actual = transportHeightMeters ? transportHeightMeters.toFixed(2) : 'N/A';
+                        const isViolation = transportHeightMeters > limit;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Wysokość:</strong> ${actual}m (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
                     }
                     limitInfo += '</ul>';
                 }
@@ -371,7 +378,10 @@ class OperatorDashboard {
                         <button class="btn btn-info" onclick="showRouteOnMap(${route.id})">
                             🗺️ Pokaż na mapie
                         </button>
-                        </div>
+                        <button class="btn btn-danger" onclick="operatorDashboard.deleteRoute(${route.id})">
+                            ❌ Odrzuć/Usuń trasę
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -390,10 +400,12 @@ class OperatorDashboard {
         for (let i = 0; i < pointItems.length; i++) {
             const item = pointItems[i];
             const pointName = item.dataset.pointName;
+            // Poprawiony selektor (korzysta z atrybutu name z radio buttonów)
             const decisionInput = item.querySelector(`input[name="decision-${routeId}-${i}"]:checked`);
             const comment = item.querySelector(`#comment-${routeId}-${i}`).value;
 
             if (!decisionInput) {
+                // To nie powinno się zdarzyć, ponieważ domyślny jest 'REJECTED'
                 this.showError("Musisz podjąć decyzję (Akceptuj/Odrzuć) dla każdego punktu.");
                 return;
             }
@@ -596,13 +608,13 @@ class OperatorDashboard {
 
     // ✅ ZMIANA: Ta funkcja teraz tylko pokazuje modal
     async showAddDriverModal() {
-        if (this.addDriverModalInstance) {
-            document.getElementById('add-driver-form').reset();
-            this.addDriverModalInstance.show();
-        } else {
-            // Fallback, gdyby bootstrap nie zadziałał
-            alert('Błąd: Nie można otworzyć formularza. Odśwież stronę.');
+        if (!this.addDriverModalInstance) {
+            alert('Błąd: Modal nie jest zainicjalizowany');
+            return;
         }
+
+        document.getElementById('add-driver-form').reset();
+        this.addDriverModalInstance.show();
     }
 
     // ✅ ZMIANA: Nowa funkcja do obsługi formularza dodawania kierowcy
@@ -957,8 +969,6 @@ class OperatorDashboard {
             .then(response => {
                 if (!response.ok) throw new Error('Nie udało się usunąć trasy');
                 this.showSuccess('Trasa usunięta');
-
-                // ✅ POPRAWKA: Odświeżenie list po usunięciu
                 this.loadAllRoutes();
                 this.loadRoutesRequiringAcceptance();
             })
@@ -1002,7 +1012,6 @@ async function initializeSystem() {
         // `onGoogleMapsLoaded` (callback z Google) wywoła `operatorDashboard.initMap()`
 
         // `init()` klasy zajmie się resztą (ładowaniem danych, itd.)
-        // setupAuth() jest już wywołane, więc init() go nie powtórzy
         operatorDashboard.init();
 
         switchTab('routes');
@@ -1508,12 +1517,12 @@ async function showFullValidation(routeId) {
         html += '<h5 style="color:#28a745;"><strong>DLACZEGO TA TRASA?</strong></h5>';
         html += '<div style="font-family:monospace;font-size:0.85em;line-height:1.8;margin-top:15px;">';
         validation.routeJustification.forEach(line => {
-            let style = 'margin:3px 0;';
-            if (line.includes('═══')) style += 'font-weight:bold;color:#0d6efd;font-size:1.15em;border-bottom:2px solid #0d6efd;padding:8px 0;margin-top:15px;';
-            else if (line.includes('MOŻNA PRZEJECHAĆ') || line.includes('✔')) style += 'color:#28a745;font-weight:bold;background:#d4edda;padding:8px;border-radius:5px;margin:5px 0;';
-            else if (line.includes('OMIJAMY') || line.includes('ZA CIĘŻKI')) style += 'color:#dc3545;font-weight:bold;background:#f8d7da;padding:8px;border-radius:5px;margin:5px 0;';
-            else if (line.includes('⚠') || line.includes('UWAGA')) style += 'color:#856404;font-weight:bold;background:#fff3cd;padding:8px;border-radius:5px;margin:5px 0;';
-            html += `<div style="${style}">${escapeHtml(line)}</div>`;
+            if (line.includes('═══')) return `<div style="font-weight:bold;color:#0d6efd;font-size:1.15em;border-bottom:2px solid #0d6efd;padding:8px 0;margin-top:15px;">${escapeHtml(line)}</div>`;
+            let className = '';
+            if (line.includes('MOŻNA PRZEJECHAĆ') || line.includes('✔')) className = 'style="color:#28a745;font-weight:bold;background:#d4edda;padding:6px;border-radius:4px;margin:4px 0;"';
+            else if (line.includes('OMIJAMY') || line.includes('ZA CIĘŻKI')) className = 'style="color:#dc3545;font-weight:bold;background:#f8d7da;padding:6px;border-radius:4px;margin:4px 0;"';
+            else if (line.includes('⚠') || line.includes('UWAGA')) className = 'style="color:#856404;font-weight:bold;background:#fff3cd;padding:6px;border-radius:4px;margin:4px 0;"';
+            return `<div ${className}>${escapeHtml(line)}</div>`;
         });
         html += '</div></div>';
     }
@@ -1646,7 +1655,7 @@ async function updateDriverLocation(driverUsername) {
             return;
         }
         const position = { lat: driverInfo.latitude, lng: driverInfo.longitude };
-        document.getElementById('driver-speed').textContent = `${Math.round(driverInfo.speedKmh || 0)} km/h`;
+        document.getElementById('driver-speed').textContent = `${Math.round(position.speedKmh || 0)} km/h`;
         if (driverInfo.lastUpdate) {
             const lastUpdate = new Date(driverInfo.lastUpdate);
             const now = new Date();
@@ -1663,7 +1672,7 @@ async function updateDriverLocation(driverUsername) {
         } else {
             operatorDashboard.driverLocationMarker = new google.maps.Marker({
                 position: position,
-                map: operatorDashboard.driverLocationMap,
+                map: map,
                 title: `Kierowca: ${driverUsername}`,
                 icon: { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#4285F4', fillOpacity: 1, strokeColor: 'white', strokeWeight: 3 }
             });
