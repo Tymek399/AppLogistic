@@ -276,6 +276,8 @@ class DriverDashboard {
                 const updatedRoute = await response.json();
                 this.showSuccess('Trasa rozpoczęta pomyślnie!');
                 this.loadRoutes();
+                // ✅ ZMIANA: Automatyczne przejście do nawigacji po rozpoczęciu trasy
+                this.startNavigation(routeId);
             } else {
                 throw new Error('Nie udało się rozpocząć trasy');
             }

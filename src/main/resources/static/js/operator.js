@@ -24,6 +24,11 @@ class OperatorDashboard {
         this.driverLocationMarker = null;
         this.driverLocationInterval = null;
         this.currentTrackedDriver = null;
+
+        // ✅ ZMIANA: Przechowuje listę kierowców i instancje modali
+        this.drivers = [];
+        this.addDriverModalInstance = null;
+        this.assignDriverModalInstance = null;
     }
 
     init() {
@@ -37,6 +42,18 @@ class OperatorDashboard {
         this.setupEventListeners();
         this.startAutoRefresh();
         this.loadRoutesRequiringAcceptance();
+
+        // ✅ ZMIANA: Inicjalizacja instancji modali
+        if (window.bootstrap) {
+            const addModalEl = document.getElementById('addDriverModal');
+            if (addModalEl) {
+                this.addDriverModalInstance = new window.bootstrap.Modal(addModalEl);
+            }
+            const assignModalEl = document.getElementById('assignDriverModal');
+            if (assignModalEl) {
+                this.assignDriverModalInstance = new window.bootstrap.Modal(assignModalEl);
+            }
+        }
     }
 
     setupAuth() {
@@ -163,6 +180,10 @@ class OperatorDashboard {
         document.getElementById('add-cargo-form')?.addEventListener('submit', (e) => handleAddCargoSubmit(e));
 
         document.getElementById('cargo-select')?.addEventListener('change', () => checkCargoCapabilities());
+
+        // ✅ ZMIANA: Powiązanie handlerów z nowymi formularzami modali
+        document.getElementById('add-driver-form')?.addEventListener('submit', (e) => this.handleAddDriverSubmit(e));
+        document.getElementById('assign-driver-form')?.addEventListener('submit', (e) => this.handleAssignDriverSubmit(e));
     }
 
     async showRoutePreview() {
@@ -364,6 +385,9 @@ class OperatorDashboard {
             const allUsers = await usersResponse.json();
             const drivers = allUsers.filter(u => u.role === 'DRIVER');
 
+            // ✅ ZMIANA: Zapisz listę kierowców w instancji
+            this.drivers = drivers;
+
             if (drivers.length === 0) {
                 listDiv.innerHTML = `
                     <div class="text-center p-4">
@@ -421,37 +445,55 @@ class OperatorDashboard {
     }
 
     updateDriversSelect(drivers) {
-        const select = document.getElementById('driver-username');
-        if (!select) return;
-        select.innerHTML = '<option value="">Wybierz kierowcę (opcjonalnie)...</option>' +
-            drivers.map(d => `<option value="${d.username}">${d.firstName || d.username} ${d.lastName || ''}</option>`).join('');
+        const driversList = drivers.map(d => `<option value="${d.username}">${d.firstName || d.username} ${d.lastName || ''}</option>`).join('');
+
+        // Aktualizuj listę w formularzu tworzenia trasy
+        const selectMain = document.getElementById('driver-username');
+        if (selectMain) {
+            selectMain.innerHTML = '<option value="">Wybierz kierowcę (opcjonalnie)...</option>' + driversList;
+        }
+
+        // ✅ ZMIANA: Aktualizuj listę w modalu przypisywania kierowcy
+        const selectModal = document.getElementById('assign-driver-select');
+        if (selectModal) {
+            selectModal.innerHTML = '<option value="">Wybierz kierowcę...</option>' + driversList;
+        }
     }
 
+    // ✅ ZMIANA: Ta funkcja teraz tylko pokazuje modal
     async showAddDriverModal() {
-        const username = prompt('Nazwa użytkownika (login):');
-        if (!username) return;
-        const password = prompt('Hasło:');
-        if (!password) return;
-        const email = prompt('Email:');
-        if (!email) return;
-        const firstName = prompt('Imię:', username);
-        const lastName = prompt('Nazwisko:', 'Kierowca');
+        if (this.addDriverModalInstance) {
+            document.getElementById('add-driver-form').reset();
+            this.addDriverModalInstance.show();
+        } else {
+            // Fallback, gdyby bootstrap nie zadziałał
+            alert('Błąd: Nie można otworzyć formularza. Odśwież stronę.');
+        }
+    }
+
+    // ✅ ZMIANA: Nowa funkcja do obsługi formularza dodawania kierowcy
+    async handleAddDriverSubmit(event) {
+        event.preventDefault();
+        const button = event.submitter;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Dodawanie...';
 
         try {
             const response = await fetch('/api/admin/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    username: username.trim(),
-                    password: password.trim(),
-                    email: email.trim(),
+                    username: document.getElementById('driver-form-username').value.trim(),
+                    password: document.getElementById('driver-form-password').value.trim(),
+                    email: document.getElementById('driver-form-email').value.trim(),
                     role: 'DRIVER',
-                    firstName: firstName,
-                    lastName: lastName
+                    firstName: document.getElementById('driver-form-firstName').value,
+                    lastName: document.getElementById('driver-form-lastName').value
                 })
             });
             if (response.ok) {
                 this.showSuccess('Kierowca dodany!');
+                this.addDriverModalInstance.hide();
                 this.loadDriversList();
             } else {
                 const err = await response.json();
@@ -459,6 +501,9 @@ class OperatorDashboard {
             }
         } catch (error) {
             this.showError('Błąd podczas dodawania kierowcy: ' + error.message);
+        } finally {
+            button.disabled = false;
+            button.innerHTML = 'Dodaj Kierowcę';
         }
     }
 
@@ -571,15 +616,50 @@ class OperatorDashboard {
         });
     }
 
+    // ✅ ZMIANA: Ta funkcja teraz tylko pokazuje modal i ustawia dane
     async showAssignDriverModal(routeId) {
-        const username = prompt('Podaj nazwę użytkownika kierowcy:');
-        if (!username || username.trim() === '') return;
+        if (!this.assignDriverModalInstance) {
+            alert('Błąd: Modal nie jest zainicjalizowany');
+            return;
+        }
+
+        // Znajdź trasę, aby wyświetlić jej nazwę
+        const route = this.routes.find(r => r.id === routeId);
+        const routeName = route ? `${route.startAddress} → ${route.endAddress}` : `Trasa #${routeId}`;
+
+        // Wypełnij formularz w modalu
+        document.getElementById('assign-driver-route-id').value = routeId;
+        document.getElementById('assign-driver-route-name').textContent = routeName;
+
+        // Zresetuj wybór
+        document.getElementById('assign-driver-select').value = "";
+
+        // Pokaż modal
+        this.assignDriverModalInstance.show();
+    }
+
+    // ✅ ZMIANA: Nowa funkcja do obsługi formularza przypisywania kierowcy
+    async handleAssignDriverSubmit(event) {
+        event.preventDefault();
+        const routeId = document.getElementById('assign-driver-route-id').value;
+        const username = document.getElementById('assign-driver-select').value;
+
+        if (!username) {
+            this.showError('Musisz wybrać kierowcę');
+            return;
+        }
+
+        const button = event.submitter;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Przypisywanie...';
+
         try {
             const response = await fetch(`/api/routes/${routeId}/assign-driver?driverUsername=${username.trim()}`, {
                 method: 'POST'
             });
             if (response.ok) {
                 this.showSuccess('Kierowca przypisany');
+                this.assignDriverModalInstance.hide();
                 this.loadAllRoutes();
             } else {
                 const errData = await response.json();
@@ -587,8 +667,12 @@ class OperatorDashboard {
             }
         } catch (error) {
             this.showError(error.message);
+        } finally {
+            button.disabled = false;
+            button.innerHTML = 'Przypisz';
         }
     }
+
 
     // Ta metoda jest teraz globalna (wywoływana z HTML)
     // async showRouteOnMap(routeId) { ... }
@@ -1030,6 +1114,7 @@ async function loadEquipmentLists() {
 
 // Globalne funkcje wywoływane przez onclick, delegujące do instancji
 function assignDriver(routeId) {
+    // ✅ ZMIANA: Delegowanie do nowej funkcji w instancji
     if(operatorDashboard) operatorDashboard.showAssignDriverModal(routeId);
 }
 
@@ -1046,6 +1131,7 @@ function refreshDrivers() {
 }
 
 function showAddDriverModal() {
+    // ✅ ZMIANA: Delegowanie do nowej funkcji w instancji
     if (operatorDashboard?.showAddDriverModal) operatorDashboard.showAddDriverModal();
 }
 

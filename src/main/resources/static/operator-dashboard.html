@@ -315,7 +315,6 @@
         </button>
     </div>
 
-    <!-- Routes Section -->
     <div id="routes-section">
         <div class="row">
             <div class="col-md-4">
@@ -379,7 +378,6 @@
         </div>
     </div>
 
-    <!-- Drivers Section -->
     <div id="drivers-section" style="display: none;">
         <div class="row">
             <div class="col-md-12">
@@ -403,7 +401,6 @@
         </div>
     </div>
 
-    <!-- Vehicles Section -->
     <div id="vehicles-section" style="display: none;">
         <div class="row">
             <div class="col-md-6">
@@ -476,7 +473,6 @@
         </div>
     </div>
 
-    <!-- Add Equipment Section -->
     <div id="add-equipment-section" style="display: none;">
         <div class="row">
             <div class="col-md-6">
@@ -551,7 +547,6 @@
     </div>
 </div>
 
-<!-- ✅ MODAL DO WYŚWIETLANIA MAPY TRASY -->
 <div id="route-map-modal" class="route-map-modal">
     <div class="route-map-container">
         <div class="route-map-header">
@@ -564,7 +559,6 @@
     </div>
 </div>
 
-<!-- ✅ MODAL ŚLEDZENIA KIEROWCY NA ŻYWO -->
 <div id="driver-location-modal" class="driver-location-modal">
     <div class="driver-location-container">
         <div class="driver-location-header">
@@ -589,6 +583,74 @@
         </div>
         <div class="driver-location-body">
             <div id="driver-location-map"></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addDriverModal" tabindex="-1" aria-labelledby="addDriverModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="add-driver-form">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addDriverModalLabel">Dodaj Nowego Kierowcę</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="driver-form-username" class="form-label">Nazwa użytkownika (login)</label>
+                        <input type="text" class="form-control" id="driver-form-username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="driver-form-password" class="form-label">Hasło</label>
+                        <input type="password" class="form-control" id="driver-form-password" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="driver-form-email" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="driver-form-email" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="driver-form-firstName" class="form-label">Imię</label>
+                            <input type="text" class="form-control" id="driver-form-firstName">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="driver-form-lastName" class="form-label">Nazwisko</label>
+                            <input type="text" class="form-control" id="driver-form-lastName">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary">Dodaj Kierowcę</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="assignDriverModal" tabindex="-1" aria-labelledby="assignDriverModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="assign-driver-form">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="assignDriverModalLabel">Przypisz Kierowcę do Trasy</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="assign-driver-route-id">
+                    <p>Wybierz kierowcę dla trasy: <strong id="assign-driver-route-name">#</strong></p>
+                    <div class="mb-3">
+                        <label for="assign-driver-select" class="form-label">Dostępni Kierowcy</label>
+                        <select class="form-select" id="assign-driver-select" required>
+                            <option value="">Ładowanie...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary">Przypisz</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

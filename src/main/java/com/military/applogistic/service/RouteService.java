@@ -288,6 +288,8 @@ public class RouteService {
             }
         }
 
+        // ... wewnątrz metody createHeavyVehicleRouteWithValidation ...
+
         // ============================================================================
         // KROK 3: OSTATECZNA PORAŻKA - DRAFT DLA OPERATORA
         // ============================================================================
@@ -304,17 +306,36 @@ public class RouteService {
         Set<String> allRejectedPointsSet = new HashSet<>();
         List<Map<String, Object>> rejectedPointsDetails = new ArrayList<>();
 
+        // ✅ POPRAWKA: Zbieramy punkty problematyczne ze WSZYSTKICH prób
         for (RouteAttemptReport report : allAttempts) {
-            if (report.getCriticalBridges() != null) {
+            // 1. Zbieramy BLOKUJĄCE MOSTY (jeśli są)
+            if (report.getCriticalBridges() != null && !report.getCriticalBridges().isEmpty()) {
                 for (String bridge : report.getCriticalBridges()) {
-                    if (allRejectedPointsSet.add(bridge)) {
+                    if (allRejectedPointsSet.add(bridge)) { // <-- Tylko nazwy mostów
                         Map<String, Object> rejectedPoint = new HashMap<>();
                         rejectedPoint.put("name", bridge);
                         rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
-                        rejectedPoint.put("reason", report.getViolations());
-                        rejectedPoint.put("canBeAccepted", true);
+                        List<String> reasons = report.getViolations() != null && !report.getViolations().isEmpty() ?
+                                report.getViolations() : List.of("Przekroczone parametry mostu");
+                        rejectedPoint.put("reason", reasons);
+                        rejectedPoint.put("canBeAccepted", true); // Mosty można akceptować
                         rejectedPointsDetails.add(rejectedPoint);
                     }
+                }
+            }
+            // 2. Zbieramy BŁĘDY WALIDACJI (np. z HERE), jeśli nie ma mostów
+            else if (report.getViolations() != null && !report.getViolations().isEmpty()) {
+                // To jest błąd na poziomie trasy, nie punktu (np. HERE zablokował)
+                String reasonKey = String.join(", ", report.getViolations());
+                if (allRejectedPointsSet.add(reasonKey)) { // <-- Użyj błędu jako klucza
+                    Map<String, Object> rejectedPoint = new HashMap<>();
+                    rejectedPoint.put("name", "Błąd walidacji trasy (np. HERE Maps)");
+                    rejectedPoint.put("firstSeenAttempt", report.getAttemptNumber());
+                    rejectedPoint.put("reason", report.getViolations());
+                    // Błędu walidacji całej trasy nie można "zaakceptować" punktowo
+                    // Operator musi albo zaakceptować całą trasę mimo wszystko, albo ją odrzucić.
+                    rejectedPoint.put("canBeAccepted", true);
+                    rejectedPointsDetails.add(rejectedPoint);
                 }
             }
         }
