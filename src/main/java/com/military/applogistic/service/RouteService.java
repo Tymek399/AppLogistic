@@ -157,6 +157,7 @@ public class RouteService {
 
         List<RouteAttemptReport> allAttempts = new ArrayList<>();
         Set<String> excludedInfrastructure = new HashSet<>();
+        Set<String> forceAcceptedPoints = new HashSet<>(); // ✅ P2 FIX: Punkty zaakceptowane przez operatora
         Map<String, Object> validatedRouteData = null;
 
         // ============================================================================
@@ -177,7 +178,7 @@ public class RouteService {
             );
 
             RouteAttemptReport attemptReport = validateRouteBeforeSaving(
-                    routeData, 1, new HashSet<>(), transportSet
+                    routeData, 1, new HashSet<>(), transportSet, forceAcceptedPoints
             );
             attemptReport.setPreferredHighways(true);
             allAttempts.add(attemptReport);
@@ -230,6 +231,7 @@ public class RouteService {
             log.info("┌────────────────────────────────────────────────────────────┐");
             log.info("│ 🔍 PRÓBA #{} - Szukanie trasy alternatywnej                │", attempt);
             log.info("│ 🚫 Wykluczonych obiektów: {}                               │", excludedInfrastructure.size());
+            log.info("│ ✅ Wymuszonych zaakceptowanych: {}                          │", forceAcceptedPoints.size());
             log.info("└────────────────────────────────────────────────────────────┘");
 
             try {
@@ -242,7 +244,7 @@ public class RouteService {
                 );
 
                 RouteAttemptReport attemptReport = validateRouteBeforeSaving(
-                        routeData, attempt, excludedInfrastructure, transportSet
+                        routeData, attempt, excludedInfrastructure, transportSet, forceAcceptedPoints
                 );
                 attemptReport.setPreferredHighways(false);
                 allAttempts.add(attemptReport);
@@ -517,7 +519,8 @@ public class RouteService {
             Map<String, Object> routeData,
             int attemptNumber,
             Set<String> excludedBridges,
-            TransportSet transportSet) {
+            TransportSet transportSet,
+            Set<String> forceAcceptedPoints) { // ✅ P2 FIX: Dodano parametr dla wymuszonych akceptacji
 
         RouteAttemptReport report = new RouteAttemptReport();
         report.setAttemptNumber(attemptNumber);
@@ -551,6 +554,22 @@ public class RouteService {
         List<Map<String, Object>> problematicInfrastructure = infrastructure.stream()
                 .filter(i -> Boolean.FALSE.equals(i.get("canPass")))
                 .collect(Collectors.toList());
+
+        // ✅ P2 FIX: Filtruj problematyczne punkty, usuwając te wymuszone jako zaakceptowane
+        if (!forceAcceptedPoints.isEmpty()) {
+            int beforeSize = problematicInfrastructure.size();
+            problematicInfrastructure = problematicInfrastructure.stream()
+                    .filter(i -> {
+                        String pointName = (String) i.get("name");
+                        return pointName == null || !forceAcceptedPoints.contains(pointName);
+                    })
+                    .collect(Collectors.toList());
+            int filteredCount = beforeSize - problematicInfrastructure.size();
+            if (filteredCount > 0) {
+                log.info("✅ P2 FIX: Pomijam {} punktów wymuszonych jako zaakceptowane", filteredCount);
+            }
+        }
+
         report.setProblematicInfrastructure(problematicInfrastructure);
 
         // Zapisz tylko nazwy dla starszej logiki (np. pętli wykluczeń)
@@ -1333,10 +1352,11 @@ public class RouteService {
             decisionMap.put(decision.getPointName(), decision);
         }
 
-        // Przetwórz każdy punkt
-        List<String> acceptedPoints = new ArrayList<>();
-        List<String> rejectedPointsList = new ArrayList<>();
+        // ✅ P2 FIX: Zbierz punkty zaakceptowane przez operatora
+        Set<String> acceptedPoints = new HashSet<>();
+        Set<String> rejectedPointsList = new HashSet<>();
 
+        // Przetwórz każdy punkt
         for (Map<String, Object> point : rejectedPoints) {
             String pointName = (String) point.get("name");
             PointDecisionDto decision = decisionMap.get(pointName);
@@ -1352,7 +1372,7 @@ public class RouteService {
                 point.put("operatorDecisionBy", operatorUsername);
                 point.put("operatorDecisionAt", LocalDateTime.now().toString());
                 point.put("operatorComment", decision.getComment());
-                acceptedPoints.add(pointName);
+                acceptedPoints.add(pointName); // ✅ P2 FIX: Dodaj do zbioru zaakceptowanych
                 log.info("✅ Punkt '{}' ZAAKCEPTOWANY przez {}", pointName, operatorUsername);
 
             } else if ("REJECTED".equals(decision.getDecision())) {
@@ -1384,13 +1404,13 @@ public class RouteService {
                     routeId,
                     operatorUsername,
                     "Wszystkie punkty problematyczne zaakceptowane przez operatora",
-                    acceptedPoints
+                    new ArrayList<>(acceptedPoints)
             );
 
         } else {
             // SCENARIUSZ 2: Są punkty odrzucone (REJECTED_LIST > 0)
             log.info("🔄 ROZPOCZYNAM REWALIDACJĘ - {} punktów odrzuconych", rejectedPointsList.size());
-            return revalidateRouteWithExclusions(route, rejectedPointsList, acceptedPoints, operatorUsername);
+            return revalidateRouteWithExclusions(route, new ArrayList<>(rejectedPointsList), new ArrayList<>(acceptedPoints), operatorUsername);
         }
     }
 
@@ -1412,6 +1432,9 @@ public class RouteService {
         // Konwertuj nazwy punktów na set do wykluczenia
         Set<String> exclusions = new HashSet<>(excludedPointNames);
 
+        // ✅ P2 FIX: Konwertuj zaakceptowane punkty na set do wymuszenia akceptacji
+        Set<String> forceAcceptedPoints = new HashSet<>(acceptedPointNames);
+
         try {
             // Pobierz nową trasę z Google Maps z wykluczeniami
             log.info("🔍 Szukam nowej trasy omijającej odrzucone punkty...");
@@ -1420,16 +1443,17 @@ public class RouteService {
                     route.getStartAddress(),
                     route.getEndAddress(),
                     route.getTransportSet(),
-                    exclusions,  // Przekaż wykluczenia
+                    exclusions,  // Przekaż wykluczenia (P2 FIX: to są tylko te ODRZUCONE)
                     false        // Nie preferuj autostrad - szukaj DOWOLNEJ trasy
             );
 
-            // Waliduj nową trasę
+            // Waliduj nową trasę z wymuszonymi zaakceptowanymi punktami
             RouteAttemptReport validationReport = validateRouteBeforeSaving(
                     newRouteData,
                     100, // Numer próby (specjalny dla rewalidacji)
                     exclusions,
-                    route.getTransportSet()
+                    route.getTransportSet(),
+                    forceAcceptedPoints // ✅ P2 FIX: Przekaż punkty wymuszone jako zaakceptowane
             );
 
             // Zapisz dane trasy niezależnie od wyniku
@@ -1458,7 +1482,7 @@ public class RouteService {
                 route.setOperatorAcceptedBy(operatorUsername);
                 route.setOperatorAcceptedAt(LocalDateTime.now());
                 route.setOperatorComment("Trasa zrewalidowana - odrzucone punkty ominięte");
-                route.setRejectedPointsJson(null); // Wyczyść stare problemy
+                route.setRejectedPointsJson(null); // P2 FIX: Wyczyść stare problemy
 
                 Route savedRoute = routeRepository.save(route);
                 log.info("✅ Trasa #{} zaakceptowana po rewalidacji", route.getId());
