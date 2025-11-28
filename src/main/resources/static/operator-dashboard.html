@@ -310,8 +310,11 @@
         <button id="vehicles-tab" class="btn btn-outline-primary me-2" onclick="switchTab('vehicles')">
             Zestawy Transportowe
         </button>
-        <button id="add-equipment-tab" class="btn btn-outline-primary" onclick="switchTab('add-equipment')">
+        <button id="add-equipment-tab" class="btn btn-outline-primary me-2" onclick="switchTab('add-equipment')">
             Dodaj Sprzęt
+        </button>
+        <button id="trailers-tab" class="btn btn-outline-primary" onclick="switchTab('trailers')">
+            Naczepy
         </button>
     </div>
 
@@ -415,6 +418,13 @@
                                 <select id="transporter-select" class="form-select" required>
                                     <option value="">Ładowanie...</option>
                                 </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Naczepa (opcjonalnie)</label>
+                                <select id="trailer-select" class="form-select">
+                                    <option value="">Wybierz naczepę...</option>
+                                </select>
+                                <small class="form-text text-muted">Dodaj naczepę do zestawu, jeśli jest wymagana.</small>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Ładunek</label>
@@ -536,12 +546,80 @@
 
         <div class="row mt-4">
             <div class="col-md-6">
+                <div class="card shadow">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Dodaj Naczepę</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="add-trailer-form">
+                            <div class="mb-3">
+                                <label class="form-label">Nr Rejestracyjny</label>
+                                <input type="text" id="trailer-registration-number" class="form-control" required placeholder="np. WR 12345">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Typ Naczepy</label>
+                                <input type="text" id="trailer-type" class="form-control" placeholder="np. Plandeka, Chłodnia" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">VIN</label>
+                                <input type="text" id="trailer-vin" class="form-control" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Max. Ładowność (kg)</label>
+                                <input type="number" id="trailer-max-payload" class="form-control" required placeholder="np. 24000">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Długość (m)</label>
+                                <input type="number" id="trailer-length" class="form-control" step="0.01" required placeholder="np. 13.6">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Szerokość (m)</label>
+                                <input type="number" id="trailer-width" class="form-control" step="0.01" required placeholder="np. 2.55">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Wysokość (m)</label>
+                                <input type="number" id="trailer-height" class="form-control" step="0.01" required placeholder="np. 4.0">
+                            </div>
+                            <button type="submit" class="btn btn-info w-100">Dodaj Naczepę</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6"></div>
+        </div>
+        <div class="row mt-4">
+            <div class="col-md-6">
                 <h4>Ciężarówki</h4>
                 <div id="transporters-list"></div>
             </div>
             <div class="col-md-6">
                 <h4>Ładunki</h4>
                 <div id="cargo-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="trailers-section" style="display:none;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0">Lista Zarejestrowanych Naczep</h4>
+            <button id="refresh-trailers-list" class="btn btn-outline-secondary me-2" onclick="operatorDashboard.loadTrailers()">
+                🔄 Odśwież listę
+            </button>
+        </div>
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Dostępne Naczepy</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="trailers-list">
+                            <p class="text-center p-4">
+                            <div class="spinner-border text-primary"></div> Ładowanie listy naczep...
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

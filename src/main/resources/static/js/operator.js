@@ -1,22 +1,22 @@
-// operator.js - Kompletna, połączona i naprawiona wersja
+// operator.js - Wersja naprawiona (Fix ID mismatch)
 class OperatorDashboard {
     constructor() {
         this.token = localStorage.getItem('token');
         this.username = localStorage.getItem('username');
         this.map = null;
         this.directionsService = null;
-        this.directionsRenderer = null; // Dla zatwierdzonej trasy
-        this.previewRenderer = null; // Dla podglądu pierwotnej trasy
+        this.directionsRenderer = null;
+        this.previewRenderer = null;
         this.driverMarkers = {};
         this.transportSets = [];
+        this.allTrailers = [];
         this.activeDrivers = [];
         this.refreshInterval = null;
         this.routes = [];
         this.mapInitialized = false;
-        this.rejectedPointsMarkers = []; // Markery dla odrzuconych punktów
-        this.routesRequiringAcceptance = []; // Trasy do akceptacji
+        this.rejectedPointsMarkers = [];
+        this.routesRequiringAcceptance = [];
 
-        // Zmienne globalne (przeniesione z HTML)
         this.allCargo = [];
         this.selectedTransportMode = 'trailer';
         this.routePreviewMap = null;
@@ -25,25 +25,21 @@ class OperatorDashboard {
         this.driverLocationInterval = null;
         this.currentTrackedDriver = null;
 
-        // ✅ ZMIANA: Przechowuje listę kierowców i instancje modali
         this.drivers = [];
         this.addDriverModalInstance = null;
         this.assignDriverModalInstance = null;
     }
 
     init() {
-        // setupAuth() jest teraz wywoływane *przed* init() w initializeSystem()
-        // więc nie musimy go tu wywoływać
-
         const username = localStorage.getItem('username');
         if (username) document.getElementById('username').textContent = username;
 
         this.loadTransportSets();
+        this.loadTrailers();
         this.setupEventListeners();
         this.startAutoRefresh();
         this.loadRoutesRequiringAcceptance();
 
-        // ✅ ZMIANA: Inicjalizacja instancji modali
         if (window.bootstrap) {
             const addModalEl = document.getElementById('addDriverModal');
             if (addModalEl) {
@@ -57,7 +53,6 @@ class OperatorDashboard {
     }
 
     setupAuth() {
-        // Ta funkcja "łata" globalny 'fetch', aby dodawać token
         const originalFetch = window.fetch;
         window.fetch = (...args) => {
             const headers = (args[1] && args[1].headers) ? { ...args[1].headers } : {};
@@ -85,7 +80,6 @@ class OperatorDashboard {
         }
 
         try {
-            // Inicjalizacja głównej mapy
             this.map = new window.google.maps.Map(mapContainer, {
                 zoom: 6,
                 center: { lat: 52.0693, lng: 19.4803 },
@@ -97,7 +91,6 @@ class OperatorDashboard {
 
             this.directionsService = new window.google.maps.DirectionsService();
 
-            // Główny renderer (niebieski)
             this.directionsRenderer = new window.google.maps.DirectionsRenderer({
                 suppressMarkers: false,
                 draggable: false,
@@ -105,7 +98,6 @@ class OperatorDashboard {
             });
             this.directionsRenderer.setMap(this.map);
 
-            // Renderer podglądu (pomarańczowy)
             this.previewRenderer = new window.google.maps.DirectionsRenderer({
                 suppressMarkers: true,
                 draggable: false,
@@ -113,15 +105,21 @@ class OperatorDashboard {
             });
             this.previewRenderer.setMap(this.map);
 
-            // Inicjalizacja map w modalach (z HTML)
-            this.routePreviewMap = new google.maps.Map(document.getElementById('route-preview-map'), {
-                zoom: 10,
-                center: { lat: 52.0693, lng: 19.4803 }
-            });
-            this.driverLocationMap = new google.maps.Map(document.getElementById('driver-location-map'), {
-                zoom: 16,
-                center: { lat: 52.2297, lng: 21.0122 }
-            });
+            const routePreviewEl = document.getElementById('route-preview-map');
+            if (routePreviewEl) {
+                this.routePreviewMap = new google.maps.Map(routePreviewEl, {
+                    zoom: 10,
+                    center: { lat: 52.0693, lng: 19.4803 }
+                });
+            }
+
+            const driverLocEl = document.getElementById('driver-location-map');
+            if (driverLocEl) {
+                this.driverLocationMap = new google.maps.Map(driverLocEl, {
+                    zoom: 16,
+                    center: { lat: 52.2297, lng: 21.0122 }
+                });
+            }
 
             this.mapInitialized = true;
             console.log('Google Maps initialized');
@@ -161,7 +159,6 @@ class OperatorDashboard {
     }
 
     setupEventListeners() {
-        // Event listenery dla klasy (formularz, odświeżanie)
         document.getElementById('route-form')?.addEventListener('submit', (e) => this.handleRouteSubmit(e));
         document.getElementById('refresh-drivers-list')?.addEventListener('click', () => this.loadDriversList());
         document.getElementById('refresh-routes')?.addEventListener('click', () => this.loadAllRoutes());
@@ -169,19 +166,21 @@ class OperatorDashboard {
         document.getElementById('start-address')?.addEventListener('blur', () => this.showRoutePreview());
         document.getElementById('end-address')?.addEventListener('blur', () => this.showRoutePreview());
 
-        // Event listenery dla funkcji globalnych (z HTML)
         document.getElementById('routes-tab')?.addEventListener('click', () => switchTab('routes'));
         document.getElementById('drivers-tab')?.addEventListener('click', () => switchTab('drivers'));
         document.getElementById('vehicles-tab')?.addEventListener('click', () => switchTab('vehicles'));
         document.getElementById('add-equipment-tab')?.addEventListener('click', () => switchTab('add-equipment'));
+        document.getElementById('trailers-tab')?.addEventListener('click', () => switchTab('trailers'));
 
         document.getElementById('vehicle-form')?.addEventListener('submit', (e) => handleVehicleFormSubmit(e));
         document.getElementById('add-transporter-form')?.addEventListener('submit', (e) => handleAddTransporterSubmit(e));
         document.getElementById('add-cargo-form')?.addEventListener('submit', (e) => handleAddCargoSubmit(e));
 
+        document.getElementById('add-trailer-form')?.addEventListener('submit', (e) => handleAddTrailerSubmit(e));
+        document.getElementById('add-transport-set-form')?.addEventListener('submit', (e) => handleAddNewTransportSetSubmit(e));
+
         document.getElementById('cargo-select')?.addEventListener('change', () => checkCargoCapabilities());
 
-        // ✅ ZMIANA: Powiązanie handlerów z nowymi formularzami modali
         document.getElementById('add-driver-form')?.addEventListener('submit', (e) => this.handleAddDriverSubmit(e));
         document.getElementById('assign-driver-form')?.addEventListener('submit', (e) => this.handleAssignDriverSubmit(e));
     }
@@ -200,8 +199,8 @@ class OperatorDashboard {
 
             this.directionsService.route(request, (result, status) => {
                 if (status === 'OK') {
-                    this.directionsRenderer.setDirections({ routes: [] }); // Wyczyść główną
-                    this.previewRenderer.setDirections(result); // Pokaż na podglądzie
+                    this.directionsRenderer.setDirections({ routes: [] });
+                    this.previewRenderer.setDirections(result);
                 }
             });
         } catch (error) {
@@ -218,6 +217,60 @@ class OperatorDashboard {
         } catch (error) {
             this.showError('Błąd podczas ładowania zestawów');
         }
+    }
+
+    async loadTrailers() {
+        try {
+            // PRAWIDŁOWY ENDPOINT DLA POBRANIA LISTY
+            const response = await fetch('/api/trailers');
+            if (!response.ok) {
+                throw new Error(`Failed to load trailers: ${response.statusText}`);
+            }
+            // Zapisanie pobranej listy do zmiennej klasy
+            this.allTrailers = await response.json();
+
+            // WYWOŁANIE FUNKCJI WYŚWIETLAJĄCEJ LISTĘ W SEKCJACH
+            this.populateTrailersSelect(); // Wypełnia select dla zestawów transportowych
+            this.displayTrailersList();    // Wyświetla listę w sekcji "Naczepy"
+
+        } catch (error) {
+            this.allTrailers = [];
+            console.error('Błąd podczas ładowania naczep:', error);
+            this.showError('Błąd podczas ładowania naczep: ' + error.message);
+            this.populateTrailersSelect();
+            this.displayTrailersList();
+        }
+    }
+
+    populateTrailersSelect() {
+        const select = document.getElementById('transport-set-trailer-select');
+        if (!select) return;
+        select.innerHTML = '<option value="">Wybierz naczepę...</option>';
+        this.allTrailers.forEach(trailer => {
+            const option = document.createElement('option');
+            option.value = trailer.id;
+            option.textContent = `${trailer.registration_number} (${trailer.trailer_type}, ${trailer.max_payload}kg)`;
+            select.appendChild(option);
+        });
+    }
+
+    displayTrailersList() {
+        const container = document.getElementById('trailers-list');
+        if (!container) return;
+        if (this.allTrailers.length === 0) {
+            container.innerHTML = '<p class="text-muted">Brak zarejestrowanych naczep.</p>';
+            return;
+        }
+        container.innerHTML = this.allTrailers.map(trailer => `
+            <div class="card mb-2">
+                <div class="card-body p-2">
+                    <strong>${this.escapeHtml(trailer.registration_number)}</strong> 
+                    <span class="badge bg-info text-dark">${this.escapeHtml(trailer.trailer_type)}</span><br>
+                    <small>VIN: ${this.escapeHtml(trailer.vin)}</small><br>
+                    <small>Ładowność: ${trailer.max_payload}kg, Wymiary: ${trailer.length}x${trailer.width}x${trailer.height}m</small>
+                </div>
+            </div>
+        `).join('');
     }
 
     populateTransportSetsSelect() {
@@ -262,19 +315,11 @@ class OperatorDashboard {
         `;
     }
 
-    /**
-     * ✅ P3 FIX: POPRAWIONE PARSOWANIE DETALI I DOMYŚLNE ODRZUCANIE
-     */
     renderRouteRequiringAcceptance(route) {
         let rejectedPointsHtml = '';
-
-        // Wyodrębnij parametry transportu (zawsze dostępne w routeData)
-        const validationDetails = route.routeData?.validation;
-        // W najnowszej wersji back-endu, transportInfo jest bezpośrednio w routeData
         const transportInfo = route.routeData?.transportSetInfo || {};
         const transportWeightTons = transportInfo.weightTon;
         const transportHeightMeters = transportInfo.heightM;
-
 
         if (route.rejectedPoints && route.rejectedPoints.length > 0) {
             rejectedPointsHtml = `
@@ -285,8 +330,7 @@ class OperatorDashboard {
                 const reasonArray = point.reason || [];
                 const mainReason = reasonArray.length > 0 ? reasonArray[0] : 'Brak szczegółowego powodu.';
 
-                // P3 FIX: Ekstrakcja limitów za pomocą regex
-                let detailsHtml = `<span class="text-danger"><strong>Powód:</strong> ${escapeHtml(mainReason.split(' (Limit')[0] || mainReason)}</span>`;
+                let detailsHtml = `<span class="text-danger"><strong>Powód:</strong> ${this.escapeHtml(mainReason.split(' (Limit')[0] || mainReason)}</span>`;
 
                 const weightMatch = mainReason.match(/\(Limit nośności: ([\d.]+t)\)/);
                 const heightMatch = mainReason.match(/\(Limit wysokości: ([\d.]+m)\)/);
@@ -295,96 +339,97 @@ class OperatorDashboard {
 
                 if (weightMatch || heightMatch) {
                     limitInfo += '<ul class="list-unstyled mt-2 mb-0" style="font-size:0.9em;">';
-
                     if (weightMatch) {
                         const limitStr = weightMatch[1];
                         const limit = parseFloat(limitStr.replace('t', ''));
                         const actual = transportWeightTons ? transportWeightTons.toFixed(1) : 'N/A';
                         const isViolation = transportWeightTons > limit;
-                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Nośność:</strong> ${actual}t (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Nośność:</strong> ${actual}t (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono o ' + (transportWeightTons - limit).toFixed(1) + 't' : '✅ OK'}</li>`;
                     }
-
                     if (heightMatch) {
                         const limitStr = heightMatch[1];
                         const limit = parseFloat(limitStr.replace('m', ''));
                         const actual = transportHeightMeters ? transportHeightMeters.toFixed(2) : 'N/A';
                         const isViolation = transportHeightMeters > limit;
-                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Wysokość:</strong> ${actual}m (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono' : '✅ OK'}</li>`;
+                        limitInfo += `<li class="${isViolation ? 'text-danger' : 'text-success'}"><strong>Wysokość:</strong> ${actual}m (Limit: ${limitStr}) ${isViolation ? '❌ Przekroczono o ' + (transportHeightMeters - limit).toFixed(2) + 'm' : '✅ OK'}</li>`;
                     }
                     limitInfo += '</ul>';
                 }
 
+                const cityInfo = point.city ? `<div class="text-muted small mt-1"><strong>📍 Miasto:</strong> ${this.escapeHtml(point.city)}</div>` : '';
+
                 return `
-                                <div class="rejected-point-item" data-point-name="${escapeHtml(point.name || 'Unknown Point')}">
-                                    <div class="point-details">
-                                        <strong>${escapeHtml(point.name || 'Punkt bez nazwy')}</strong>
+                            <div class="rejected-point-item" data-point-name="${this.escapeHtml(point.name || 'Unknown Point')}">
+                                <div class="point-details">
+                                    <strong>${this.escapeHtml(point.name || 'Punkt bez nazwy')}</strong>
+                                    ${cityInfo}
+                                </div>
+                                <div class="point-reason">
+                                    ${detailsHtml}
+                                    ${limitInfo}
+                                </div>
+                                <div class="decision-radios">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="decision-${route.id}-${idx}" id="accept-${route.id}-${idx}" value="ACCEPTED">
+                                        <label class="form-check-label text-success" for="accept-${route.id}-${idx}">
+                                            ✅ Akceptuj
+                                        </label>
                                     </div>
-                                    <div class="point-reason">
-                                        ${detailsHtml}
-                                        ${limitInfo}
-                                    </div>
-                                    <div class="decision-radios">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="radio" name="decision-${route.id}-${idx}" id="accept-${route.id}-${idx}" value="ACCEPTED">
-                                            <label class="form-check-label text-success" for="accept-${route.id}-${idx}">
-                                                ✅ Akceptuj
-                                            </label>
-                                        </div>
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="radio" name="decision-${route.id}-${idx}" id="reject-${route.id}-${idx}" value="REJECTED" checked>
-                                            <label class="form-check-label text-danger" for="reject-${route.id}-${idx}">
-                                                ❌ Odrzuć (szukaj objazdu)
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="form-group mt-2">
-                                        <textarea id="comment-${route.id}-${idx}" class="form-control form-control-sm" rows="1"
-                                                  placeholder="Opcjonalny komentarz do punktu..."></textarea>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="decision-${route.id}-${idx}" id="reject-${route.id}-${idx}" value="REJECTED" checked>
+                                        <label class="form-check-label text-danger" for="reject-${route.id}-${idx}">
+                                            ❌ Odrzuć (szukaj objazdu)
+                                        </label>
                                     </div>
                                 </div>
-                            `;
+                                <div class="form-group mt-2">
+                                    <textarea id="comment-${route.id}-${idx}" class="form-control form-control-sm" rows="1"
+                                              placeholder="Opcjonalny komentarz do punktu..."></textarea>
+                                </div>
+                            </div>
+                        `;
             }).join('')}
-                    </div>
                 </div>
-            `;
+            </div>
+        `;
         }
 
         let operatorMessagesHtml = '';
         if (route.operatorMessages && route.operatorMessages.length > 0) {
             operatorMessagesHtml = `
-                <p class="text-danger mb-2"><strong>Problemy z walidacją:</strong></p>
-                <ul class="mb-3">
-                    ${route.operatorMessages.map(msg => `<li>${escapeHtml(msg)}</li>`).join('')}
-                </ul>
-            `;
+            <p class="text-danger mb-2"><strong>Problemy z walidacją:</strong></p>
+            <ul class="mb-3">
+                ${route.operatorMessages.map(msg => `<li>${this.escapeHtml(msg)}</li>`).join('')}
+            </ul>
+        `;
         }
 
         return `
-            <div class="card mb-3 border-warning">
-                <div class="card-body" id="route-card-acceptance-${route.id}">
-                    <h6>Trasa #${route.id}: ${escapeHtml(route.startAddress)} → ${escapeHtml(route.endAddress)}</h6>
-                    ${operatorMessagesHtml}
-                    ${rejectedPointsHtml}
-                    
-                    <div class="btn-group mt-3">
-                        <button class="btn btn-warning" onclick="operatorDashboard.submitPointDecisions(${route.id})">
-                            Prześlij Decyzje
-                        </button>
-                        <button class="btn btn-info" onclick="showRouteOnMap(${route.id})">
-                            🗺️ Pokaż na mapie
-                        </button>
-                        <button class="btn btn-danger" onclick="operatorDashboard.deleteRoute(${route.id})">
-                            ❌ Odrzuć/Usuń trasę
-                        </button>
-                    </div>
+        <div class="card mb-3 border-warning">
+            <div class="card-body" id="route-card-acceptance-${route.id}">
+                <h6>Trasa #${route.id}: ${this.escapeHtml(route.startAddress)} → ${this.escapeHtml(route.endAddress)}</h6>
+                ${operatorMessagesHtml}
+                ${rejectedPointsHtml}
+                
+                <div class="btn-group mt-3">
+                    <button class="btn btn-warning" onclick="operatorDashboard.submitPointDecisions(${route.id})">
+                        Prześlij Decyzje
+                    </button>
+                    <button class="btn btn-info" onclick="showRouteOnMap(${route.id})">
+                        🗺️ Pokaż na mapie
+                    </button>
+                    <button class="btn btn-secondary" onclick="operatorDashboard.showValidationDetails(${route.id})">
+                        📋 Szczegóły Walidacji
+                    </button>
+                    <button class="btn btn-danger" onclick="operatorDashboard.deleteRoute(${route.id})">
+                        ❌ Odrzuć/Usuń trasę
+                    </button>
                 </div>
             </div>
-        `;
+        </div>
+    `;
     }
 
-    /**
-     * ✅ P2 FIX: Implementuje logikę rewalidacji/akceptacji.
-     */
     async submitPointDecisions(routeId) {
         const card = document.getElementById(`route-card-acceptance-${routeId}`);
         if (!card) return;
@@ -433,7 +478,6 @@ class OperatorDashboard {
                 throw new Error(result.error || 'Błąd przetwarzania decyzji');
             }
 
-            // P1 FIX: Przeładowanie po akcji
             this.loadRoutesRequiringAcceptance();
             this.loadAllRoutes();
 
@@ -454,66 +498,24 @@ class OperatorDashboard {
         }
     }
 
-
-    /**
-     * Ta funkcja jest teraz wywoływana tylko przez backend, jeśli wszystkie punkty zostały zaakceptowane.
-     * Nie jest już bezpośrednio wywoływana z UI dla tras z problemami.
-     */
-    async acceptRouteWithProblems(routeId) {
-        const comment = document.getElementById(`comment-${routeId}`)?.value;
-        if (!comment || comment.trim().length < 10) {
-            this.showError('Musisz podać uzasadnienie (min. 10 znaków)');
-            return;
-        }
-        const acceptedPoints = [];
-        const route = this.routesRequiringAcceptance.find(r => r.id === routeId);
-        if (route && route.rejectedPoints) {
-            route.rejectedPoints.forEach((point, idx) => {
-                const checkbox = document.getElementById(`point-${route.id}-${idx}`);
-                if (checkbox && checkbox.checked) {
-                    acceptedPoints.push(point.name || 'Unknown Point');
-                }
-            });
-        }
-        if (!confirm(`Akceptujesz trasę #${routeId} mimo problemów?\nZaakceptowane punkty: ${acceptedPoints.length}\nKomentarz: ${comment}`)) {
-            return;
-        }
-        try {
-            const response = await fetch(`/api/routes/${routeId}/accept-with-problems`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ comment, acceptedPoints })
-            });
-            if (!response.ok) throw new Error('Failed to accept route');
-            this.showSuccess(`✅ Trasa #${routeId} zaakceptowana`);
-            this.loadRoutesRequiringAcceptance();
-            this.loadAllRoutes();
-        } catch (error) {
-            this.showError('Błąd podczas akceptacji trasy: ' + error.message);
-        }
-    }
-
-    /**
-     * ✅ P1 FIX: Naprawiona logika ładowania wszystkich tras.
-     */
     async loadAllRoutes() {
         const container = document.getElementById('routes-list');
         if (!container) return;
-        // Płynne ładowanie (poprawka P1)
         container.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div></div>';
         try {
             const response = await fetch('/api/routes/all');
             if (!response.ok) throw new Error('Failed to load routes');
             this.routes = await response.json();
-            displayRoutesWithAllButtons(); // Używamy globalnej funkcji z HTML
+            if (typeof displayRoutesWithAllButtons === 'function') {
+                displayRoutesWithAllButtons();
+            } else {
+                this.displayRoutesSimple();
+            }
         } catch (error) {
             console.error('Error loading routes:', error);
             container.innerHTML = `<div class="alert alert-danger">Błąd ładowania tras: ${error.message}</div>`;
         }
     }
-
-    // Ta funkcja nie jest już potrzebna, bo używamy `displayRoutesWithAllButtons`
-    // displayRoutes() { ... }
 
     async loadDriversList() {
         const listDiv = document.getElementById('drivers-list');
@@ -526,7 +528,6 @@ class OperatorDashboard {
             const allUsers = await usersResponse.json();
             const drivers = allUsers.filter(u => u.role === 'DRIVER');
 
-            // ✅ ZMIANA: Zapisz listę kierowców w instancji
             this.drivers = drivers;
 
             if (drivers.length === 0) {
@@ -536,7 +537,7 @@ class OperatorDashboard {
                         <button class="btn btn-primary" onclick="operatorDashboard.showAddDriverModal()">Dodaj kierowcę</button>
                     </div>
                 `;
-                this.updateDriversSelect(drivers); // Wyczyść listę
+                this.updateDriversSelect(drivers);
                 return;
             }
 
@@ -588,31 +589,26 @@ class OperatorDashboard {
     updateDriversSelect(drivers) {
         const driversList = drivers.map(d => `<option value="${d.username}">${d.firstName || d.username} ${d.lastName || ''}</option>`).join('');
 
-        // Aktualizuj listę w formularzu tworzenia trasy
         const selectMain = document.getElementById('driver-username');
         if (selectMain) {
             selectMain.innerHTML = '<option value="">Wybierz kierowcę (opcjonalnie)...</option>' + driversList;
         }
 
-        // ✅ ZMIANA: Aktualizuj listę w modalu przypisywania kierowcy
         const selectModal = document.getElementById('assign-driver-select');
         if (selectModal) {
             selectModal.innerHTML = '<option value="">Wybierz kierowcę...</option>' + driversList;
         }
     }
 
-    // ✅ ZMIANA: Ta funkcja teraz tylko pokazuje modal
     async showAddDriverModal() {
         if (!this.addDriverModalInstance) {
             alert('Błąd: Modal nie jest zainicjalizowany');
             return;
         }
-
         document.getElementById('add-driver-form').reset();
         this.addDriverModalInstance.show();
     }
 
-    // ✅ ZMIANA: Nowa funkcja do obsługi formularza dodawania kierowcy
     async handleAddDriverSubmit(event) {
         event.preventDefault();
         const button = event.submitter;
@@ -757,29 +753,22 @@ class OperatorDashboard {
         });
     }
 
-    // ✅ ZMIANA: Ta funkcja teraz tylko pokazuje modal i ustawia dane
     async showAssignDriverModal(routeId) {
         if (!this.assignDriverModalInstance) {
             alert('Błąd: Modal nie jest zainicjalizowany');
             return;
         }
 
-        // Znajdź trasę, aby wyświetlić jej nazwę
         const route = this.routes.find(r => r.id === routeId);
         const routeName = route ? `${route.startAddress} → ${route.endAddress}` : `Trasa #${routeId}`;
 
-        // Wypełnij formularz w modalu
         document.getElementById('assign-driver-route-id').value = routeId;
         document.getElementById('assign-driver-route-name').textContent = routeName;
-
-        // Zresetuj wybór
         document.getElementById('assign-driver-select').value = "";
 
-        // Pokaż modal
         this.assignDriverModalInstance.show();
     }
 
-    // ✅ ZMIANA: Nowa funkcja do obsługi formularza przypisywania kierowcy
     async handleAssignDriverSubmit(event) {
         event.preventDefault();
         const routeId = document.getElementById('assign-driver-route-id').value;
@@ -814,10 +803,6 @@ class OperatorDashboard {
         }
     }
 
-
-    // Ta metoda jest teraz globalna (wywoływana z HTML)
-    // async showRouteOnMap(routeId) { ... }
-
     displayRouteOnMapObject(directionsResult, renderer, mapInstance = null) {
         const map = mapInstance || this.map;
         if (!renderer || !directionsResult || !map) return;
@@ -848,7 +833,7 @@ class OperatorDashboard {
                         position: results[0].geometry.location,
                         map: this.map,
                         title: `${point.name}\nPowód: ${point.reason || 'Brak'}`,
-                        icon: 'http://googleusercontent.com/maps/google.com/1' // Żółta kropka
+                        icon: 'http://googleusercontent.com/maps/google.com/1'
                     });
                     const infoWindow = new google.maps.InfoWindow({
                         content: `<h6>${point.name}</h6><p>${point.reason || 'Brak powodu'}</p>`
@@ -873,11 +858,147 @@ class OperatorDashboard {
     }
 
     async showValidationDetails(routeId) {
-        if (window.showFullValidation) {
-            window.showFullValidation(routeId);
-        } else {
-            console.error("Brak globalnej funkcji showFullValidation");
+        try {
+            const response = await fetch(`/api/routes/${routeId}/validation-details`);
+            if (!response.ok) throw new Error('Failed to load validation details');
+            const details = await response.json();
+
+            const modal = document.createElement('div');
+            modal.className = 'modal fade';
+            modal.id = 'validation-details-modal';
+            modal.innerHTML = `
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Szczegóły walidacji trasy #${routeId}</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            ${this.renderValidationDetails(details)}
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Zamknij</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+            const modalInstance = new bootstrap.Modal(modal);
+            modalInstance.show();
+
+            modal.addEventListener('hidden.bs.modal', () => {
+                document.body.removeChild(modal);
+            });
+
+        } catch (error) {
+            console.error('Error loading validation details:', error);
+            this.showError('Błąd podczas ładowania szczegółów walidacji: ' + error.message);
         }
+    }
+
+    renderValidationDetails(details) {
+        let html = '';
+
+        if (details.transportInfo) {
+            html += `
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6>Informacje o transporcie</h6>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Typ:</strong> ${details.transportInfo.type || 'N/A'}</p>
+                        <p><strong>Waga:</strong> ${details.transportInfo.weightTon || 'N/A'} t</p>
+                        <p><strong>Wysokość:</strong> ${details.transportInfo.heightM || 'N/A'} m</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (details.infrastructureDetails && details.infrastructureDetails.length > 0) {
+            html += `
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6>Szczegóły infrastruktury</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Nazwa obiektu</th>
+                                        <th>Miasto</th>
+                                        <th>Typ</th>
+                                        <th>Limit nośności</th>
+                                        <th>Limit wysokości</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${details.infrastructureDetails.map(item => `
+                                        <tr>
+                                            <td>${this.escapeHtml(item.name || 'N/A')}</td>
+                                            <td>${this.escapeHtml(item.city || 'N/A')}</td>
+                                            <td>${this.escapeHtml(item.type || 'N/A')}</td>
+                                            <td>${item.weightLimit ? `${item.weightLimit}t` : 'N/A'}</td>
+                                            <td>${item.heightLimit ? `${item.heightLimit}m` : 'N/A'}</td>
+                                            <td>${item.violation ? '<span class="badge bg-danger">Naruszenie</span>' : '<span class="badge bg-success">OK</span>'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (details.violations && details.violations.length > 0) {
+            html += `
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6>Zidentyfikowane naruszenia</h6>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group">
+                            ${details.violations.map(violation => `
+                                <li class="list-group-item">
+                                    <strong>${this.escapeHtml(violation.pointName || 'N/A')}</strong>
+                                    <br>
+                                    <span class="text-danger">${this.escapeHtml(violation.reason || 'N/A')}</span>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6>Zidentyfikowane naruszenia</h6>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-success">Brak naruszeń na trasie.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (details.routeJustification) {
+            html += `
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6>Uzasadnienie trasy</h6>
+                    </div>
+                    <div class="card-body">
+                        <p>${this.escapeHtml(details.routeJustification)}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        return html;
     }
 
     showDetailedReport(report) {
@@ -974,18 +1095,25 @@ class OperatorDashboard {
         if (this.refreshInterval) clearInterval(this.refreshInterval);
         if (this.driverLocationInterval) clearInterval(this.driverLocationInterval);
     }
+
+    escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
 }
 
 // -------------------------------------------------------------------
-// START Globalna logika (przeniesiona z HTML)
+// START Globalna logika
 // -------------------------------------------------------------------
 
-let operatorDashboard; // Globalna instancja
+let operatorDashboard;
 let googleMapsLoaded = false;
 
-/**
- * Główny punkt startowy aplikacji, wywoływany przez DOMContentLoaded
- */
 async function initializeSystem() {
     try {
         const token = localStorage.getItem('token');
@@ -994,19 +1122,12 @@ async function initializeSystem() {
             return;
         }
 
-        // Natychmiast utwórz instancję klasy
         operatorDashboard = new OperatorDashboard();
-        window.operatorDashboard = operatorDashboard; // Udostępnij globalnie
+        window.operatorDashboard = operatorDashboard;
 
-        // NAPRAWA BŁĘDU: Najpierw "załataj" fetch, potem pobieraj klucz
         operatorDashboard.setupAuth();
 
-        // Rozpocznij ładowanie mapy (pobierze klucz API)
         await loadGoogleMaps();
-
-        // `onGoogleMapsLoaded` (callback z Google) wywoła `operatorDashboard.initMap()`
-
-        // `init()` klasy zajmie się resztą (ładowaniem danych, itd.)
         operatorDashboard.init();
 
         switchTab('routes');
@@ -1017,14 +1138,10 @@ async function initializeSystem() {
     }
 }
 
-/**
- * Ładuje skrypt Google Maps (pobiera klucz API)
- */
 async function loadGoogleMaps() {
     if (googleMapsLoaded) return Promise.resolve();
 
     try {
-        // `fetch` jest już "załatan" przez `setupAuth()`
         const response = await fetch('/api/config/google-maps-key');
 
         if (!response.ok) throw new Error(`Nie udało się pobrać klucza API (status: ${response.status})`);
@@ -1039,7 +1156,6 @@ async function loadGoogleMaps() {
             script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=onGoogleMapsLoaded`;
             script.onerror = () => reject(new Error('Nie udało się załadować skryptu Google Maps'));
 
-            // Definiujemy globalny callback
             window.onGoogleMapsLoaded = () => {
                 console.log("Google Maps API loaded.");
                 googleMapsLoaded = true;
@@ -1052,17 +1168,13 @@ async function loadGoogleMaps() {
     } catch (error) {
         console.error('Google Maps loading failed:', error);
         alert('Nie udało się załadować API Google Maps. Powód: ' + error.message);
-        throw error; // Rzuć błąd dalej, aby zatrzymać `initializeSystem`
+        throw error;
     }
 }
 
-// -------------------------------------------------------------------
-// Funkcje globalne (wywoływane przez onclick z HTML)
-// -------------------------------------------------------------------
-
 function switchTab(tab) {
-    document.querySelectorAll('#routes-section, #drivers-section, #vehicles-section, #add-equipment-section').forEach(el => el.style.display = 'none');
-    document.querySelectorAll('#routes-tab, #drivers-tab, #vehicles-tab, #add-equipment-tab').forEach(el => {
+    document.querySelectorAll('#routes-section, #drivers-section, #vehicles-section, #add-equipment-section, #trailers-section').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('#routes-tab, #drivers-tab, #vehicles-tab, #add-equipment-tab, #trailers-tab').forEach(el => {
         el.classList.remove('btn-primary');
         el.classList.add('btn-outline-primary');
     });
@@ -1086,6 +1198,8 @@ function switchTab(tab) {
         loadVehiclesTab();
     } else if (tab === 'add-equipment') {
         loadEquipmentLists();
+    } else if (tab === 'trailers') {
+        if (operatorDashboard?.loadTrailers) operatorDashboard.loadTrailers();
     }
 }
 
@@ -1126,7 +1240,7 @@ async function loadVehiclesTab() {
             fetch('/api/vehicles/transport-sets').then(r => r.json())
         ]);
 
-        operatorDashboard.allCargo = cargo; // Zapisz w instancji
+        operatorDashboard.allCargo = cargo;
 
         document.getElementById('transporter-select').innerHTML = '<option value="">Wybierz...</option>' +
             transporters.map(t => `<option value="${t.id}">${t.model} (${t.totalWeightKg}kg)</option>`).join('');
@@ -1146,67 +1260,71 @@ async function loadVehiclesTab() {
                 </div>
             </div>
         `).join('');
+
+        if (operatorDashboard) operatorDashboard.loadTrailers();
+
     } catch (error) {
         console.error('Error loading vehicles:', error);
     }
 }
 
-// Formularze z zakładki "Vehicles"
+// ✅ NAPRAWIONO: Użycie właściwego ID pola 'transport-mode' zamiast 'trailer-type'
 async function handleVehicleFormSubmit(e) {
     e.preventDefault();
     try {
+        // Poprawka: użyj ukrytego pola transport-mode, które faktycznie istnieje w HTML
+        const trailerType = document.getElementById('transport-mode')?.value || 'trailer';
+
         const response = await fetch('/api/vehicles/transport-sets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 transporterId: document.getElementById('transporter-select').value,
                 cargoId: document.getElementById('cargo-select').value,
-                description: document.getElementById('set-description').value,
-                transportMode: operatorDashboard.selectedTransportMode
+                trailerType: trailerType
             })
         });
-        if (response.ok) {
-            alert('Zestaw utworzony!');
-            document.getElementById('vehicle-form').reset();
-            document.getElementById('transport-mode-container').style.display = 'none';
-            operatorDashboard.selectedTransportMode = 'trailer';
-            loadVehiclesTab();
-            if (operatorDashboard?.loadTransportSets) operatorDashboard.loadTransportSets();
-        }
+        if (!response.ok) throw new Error('Failed to create transport set');
+        operatorDashboard.showSuccess('Zestaw transportowy utworzony');
+        loadVehiclesTab();
+        operatorDashboard.loadTransportSets();
     } catch (error) {
-        console.error('Error:', error);
-        alert('Błąd podczas tworzenia zestawu');
+        operatorDashboard.showError('Błąd: ' + error.message);
     }
 }
 
+// ✅ NAPRAWIONO: Użycie ID zgodnych z plikiem HTML (np. trans-model zamiast transporter-model)
 async function handleAddTransporterSubmit(e) {
     e.preventDefault();
     try {
+        // Zabezpieczenie na wypadek braku pola rejestracji w HTML
+        const regInput = document.getElementById('trans-registration') || document.getElementById('transporter-registration');
+        const regValue = regInput ? regInput.value : 'BRAK-' + Date.now();
+
         const response = await fetch('/api/vehicles/transporters', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: document.getElementById('trans-model').value,
+                registrationNumber: regValue,
                 totalWeightKg: parseInt(document.getElementById('trans-weight').value),
-                heightCm: parseInt(document.getElementById('trans-height').value),
-                maxAxleLoadKg: parseInt(document.getElementById('trans-axle').value)
+                heightCm: parseInt(document.getElementById('trans-height').value)
             })
         });
-        if (response.ok) {
-            alert('Ciężarówka dodana!');
-            document.getElementById('add-transporter-form').reset();
-            loadEquipmentLists();
-        } else {
-            throw new Error('Failed');
-        }
+        if (!response.ok) throw new Error('Failed to add transporter');
+        operatorDashboard.showSuccess('Ciężarówka dodana');
+        loadVehiclesTab();
     } catch (error) {
-        alert('Błąd podczas dodawania ciężarówki');
+        operatorDashboard.showError('Błąd: ' + error.message);
     }
 }
 
 async function handleAddCargoSubmit(e) {
     e.preventDefault();
     try {
+        const canDriveAloneElement = document.getElementById('cargo-can-drive-alone');
+        const canDriveAlone = canDriveAloneElement ? canDriveAloneElement.checked : false;
+
         const response = await fetch('/api/vehicles/cargo', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1214,18 +1332,149 @@ async function handleAddCargoSubmit(e) {
                 model: document.getElementById('cargo-model').value,
                 totalWeightKg: parseInt(document.getElementById('cargo-weight').value),
                 heightCm: parseInt(document.getElementById('cargo-height').value),
-                maxAxleLoadKg: parseInt(document.getElementById('cargo-axle').value)
+                canDriveAlone: canDriveAlone
             })
         });
-        if (response.ok) {
-            alert('Ładunek dodany!');
-            document.getElementById('add-cargo-form').reset();
-            loadEquipmentLists();
-        } else {
-            throw new Error('Failed');
-        }
+        if (!response.ok) throw new Error('Failed to add cargo');
+        operatorDashboard.showSuccess('Ładunek dodany');
+        loadVehiclesTab();
     } catch (error) {
-        alert('Błąd podczas dodawania ładunku');
+        operatorDashboard.showError('Błąd: ' + error.message);
+    }
+}
+
+async function handleAddTrailerSubmit(event) {
+    event.preventDefault();
+
+    // 1. Zbieranie danych z formularza
+    const registrationNumber = document.getElementById('trailer-registration-number')?.value?.trim();
+    const type = document.getElementById('trailer-type')?.value?.trim();
+    const vin = document.getElementById('trailer-vin')?.value?.trim();
+    const maxPayload = parseInt(document.getElementById('trailer-max-payload')?.value, 10);
+    const length = parseFloat(document.getElementById('trailer-length')?.value);
+    const width = parseFloat(document.getElementById('trailer-width')?.value);
+    const height = parseFloat(document.getElementById('trailer-height')?.value);
+
+    // Sprawdzenie, czy operatorDashboard jest dostępny (jest zmienną globalną)
+    if (typeof operatorDashboard === 'undefined' || operatorDashboard === null) {
+        console.error('Błąd: operatorDashboard nie jest zdefiniowany.');
+        return;
+    }
+
+    // 2. Walidacja podstawowa
+    if (!registrationNumber || !type || !vin ||
+        isNaN(maxPayload) || maxPayload <= 0 ||
+        isNaN(length) || length <= 0 ||
+        isNaN(width) || width <= 0 ||
+        isNaN(height) || height <= 0) {
+        operatorDashboard.showError('Wypełnij wszystkie pola poprawnymi danymi (numeryczne wartości > 0).');
+        return;
+    }
+
+    try {
+        // 3. Wysyłanie danych na endpoint /api/trailers
+        const response = await fetch('/api/trailers', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                registrationNumber,
+                type,
+                vin,
+                maxPayload,
+                length,
+                width,
+                height
+            })
+        });
+
+        if (!response.ok) {
+            let errorDetails = `Błąd: ${response.status} ${response.statusText}`;
+            try {
+                // Próba odczytania wiadomości błędu z serwera
+                const errorJson = await response.json();
+                errorDetails = errorJson.message || errorDetails;
+            } catch (e) {
+                // Ignorujemy błąd parsowania
+            }
+            throw new Error(errorDetails);
+        }
+
+        // 4. Sukces
+        operatorDashboard.showSuccess('Naczepa dodana pomyślnie!');
+        document.getElementById('add-trailer-form')?.reset();
+        operatorDashboard.loadTrailers(); // Odświeżenie listy naczep
+    } catch (error) {
+        console.error('Błąd dodawania naczepy:', error);
+        operatorDashboard.showError('Błąd podczas dodawania naczepy: ' + error.message);
+    }
+}
+
+/**
+ * Obsługuje formularz tworzenia nowego zestawu transportowego.
+ */
+async function handleAddNewTransportSetSubmit(e) {
+    e.preventDefault();
+
+    const button = e.submitter;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Tworzenie...';
+
+    try {
+        const transporterId = document.getElementById('transporter-select').value;
+        const cargoId = document.getElementById('cargo-select').value;
+        // KLUCZOWE: Poprawne pobranie ID naczepy (będzie puste, jeśli nie wybrano)
+        const trailerId = document.getElementById('transport-set-trailer-select').value;
+        const description = document.getElementById('set-description').value.trim();
+        // Sprawdzenie, czy wymuszono jazdę na własnych kołach (np. checkbox lub radio button)
+        const forceSelfDriving = document.getElementById('force-self-driving')?.value === 'true';
+
+        // Walidacja podstawowa
+        if (!transporterId || !cargoId || (!trailerId && !forceSelfDriving)) {
+            throw new Error('Musisz wybrać ciągnik, ładunek oraz naczepę (chyba że ładunek jest samojezdny i wymuszono jazdę na własnych kołach).');
+        }
+
+        const payload = {
+            transporterId: parseInt(transporterId, 10),
+            cargoId: parseInt(cargoId, 10),
+            description: description,
+            forceSelfDriving: forceSelfDriving
+        };
+
+        // WARUNEK: Dodaj trailerId do payloadu tylko wtedy, gdy jest wybrany
+        // I nie ma wymuszonej jazdy na własnych kołach.
+        if (trailerId && !forceSelfDriving) {
+            payload.trailerId = parseInt(trailerId, 10);
+        }
+
+        const response = await fetch('/api/vehicles/transport-sets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.message || `Nie udało się utworzyć zestawu. Status: ${response.status}`);
+        }
+
+        operatorDashboard.showSuccess('Zestaw transportowy dodany!');
+        document.getElementById('add-transport-set-form')?.reset();
+
+        // Odświeżenie listy zestawów
+        if (operatorDashboard?.loadTransportSets) {
+            operatorDashboard.loadTransportSets();
+        }
+        if (typeof loadEquipmentLists === 'function') {
+            loadEquipmentLists();
+        }
+
+    } catch (error) {
+        operatorDashboard.showError('Błąd podczas tworzenia zestawu: ' + error.message);
+    } finally {
+        button.disabled = false;
+        button.innerHTML = 'Utwórz Zestaw';
     }
 }
 
@@ -1235,26 +1484,31 @@ async function loadEquipmentLists() {
             fetch('/api/vehicles/transporters').then(r => r.json()),
             fetch('/api/vehicles/cargo').then(r => r.json())
         ]);
+
         document.getElementById('transporters-list').innerHTML = transporters.map(t => `
-            <div class="card mb-2"><div class="card-body p-2">
-                <strong>${t.model}</strong><br>
-                <small>Waga: ${t.totalWeightKg}kg, Wys: ${t.heightCm}cm</small>
-            </div></div>
+            <div class="card mb-2">
+                <div class="card-body p-2">
+                    <strong>${t.model}</strong><br>
+                    <small>Rejestracja: ${t.registrationNumber}</small><br>
+                    <small>Waga: ${t.totalWeightKg}kg, Wys: ${t.heightCm}cm</small>
+                </div>
+            </div>
         `).join('');
+
         document.getElementById('cargo-list').innerHTML = cargo.map(c => `
-            <div class="card mb-2"><div class="card-body p-2">
-                <strong>${c.model}</strong> ${c.canDriveAlone ? '🚗' : ''}<br>
-                <small>Waga: ${c.totalWeightKg}kg, Wys: ${c.heightCm}cm</small>
-            </div></div>
+            <div class="card mb-2">
+                <div class="card-body p-2">
+                    <strong>${c.model}</strong> ${c.canDriveAlone ? '🚗' : ''}<br>
+                    <small>Waga: ${c.totalWeightKg}kg, Wys: ${c.heightCm}cm</small>
+                </div>
+            </div>
         `).join('');
     } catch (error) {
         console.error('Error loading equipment:', error);
     }
 }
 
-// Globalne funkcje wywoływane przez onclick, delegujące do instancji
 function assignDriver(routeId) {
-    // ✅ ZMIANA: Delegowanie do nowej funkcji w instancji
     if(operatorDashboard) operatorDashboard.showAssignDriverModal(routeId);
 }
 
@@ -1271,7 +1525,6 @@ function refreshDrivers() {
 }
 
 function showAddDriverModal() {
-    // ✅ ZMIANA: Delegowanie do nowej funkcji w instancji
     if (operatorDashboard?.showAddDriverModal) operatorDashboard.showAddDriverModal();
 }
 
@@ -1283,7 +1536,6 @@ function logout() {
     }
 }
 
-// Globalne funkcje z bloku HTML (dla renderowania tras i modali)
 async function displayRoutesWithAllButtons() {
     const container = document.getElementById('routes-list');
     if (!operatorDashboard || !operatorDashboard.routes || operatorDashboard.routes.length === 0) {
@@ -1297,7 +1549,6 @@ async function displayRoutesWithAllButtons() {
     }
 
     let html = '';
-    // P1 FIX: Używamy Promise.all, aby przyspieszyć asynchroniczne pobieranie detali
     const detailPromises = operatorDashboard.routes.map(route => getRouteValidation(route.id));
     const validations = await Promise.all(detailPromises);
 
@@ -1309,7 +1560,6 @@ async function displayRoutesWithAllButtons() {
 
 async function getRouteValidation(routeId) {
     try {
-        // Poprawka dla P6: upewniamy się, że endpoint zwraca szczegóły
         const response = await fetch(`/api/routes/${routeId}/validation-details`);
         if (!response.ok) return null;
         return await response.json();
@@ -1318,7 +1568,6 @@ async function getRouteValidation(routeId) {
     }
 }
 
-// P4 FIX: Funkcja generująca kartę trasy, która wyświetla miasto i pełne detale
 function createCompleteRouteCard(route, validation) {
     let html = `
         <div class="route-card ${route.isDraft ? 'border-warning' : ''}">
@@ -1329,7 +1578,6 @@ function createCompleteRouteCard(route, validation) {
                     <p class="mb-1"><strong>Koniec:</strong> ${route.endAddress}</p>
     `;
 
-    // Logika badge'a
     let statusBadge = '';
     if (route.isDraft) {
         statusBadge = '<span class="badge bg-warning text-dark">Wymaga Akceptacji</span>';
@@ -1386,7 +1634,6 @@ function createCompleteRouteCard(route, validation) {
             </div>
     `;
 
-    // Reszta (uzasadnienie, pozwolenia)
     if (validation && validation.transportSetInfo) {
         const info = validation.transportSetInfo;
         html += `
@@ -1414,7 +1661,6 @@ function createCompleteRouteCard(route, validation) {
             </div>
         `;
     }
-    // P5 FIX: Wyświetl uzasadnienie dla każdej trasy (nawet czystej)
     if (validation && validation.routeJustification && validation.routeJustification.length > 0) {
         html += `
             <div class="mt-3">
@@ -1438,32 +1684,25 @@ function createCompleteRouteCard(route, validation) {
     return html;
 }
 
-// P4 FIX: Parsowanie stringu pozwolenia, aby wyodrębnić miasto
 function parsePermitString(permitString, index) {
     let html = `<div class="permit-item"><div style="display:flex; align-items:center; margin-bottom:8px;">`;
     html += `<span style="background:#ff9800;color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;margin-right:12px;">${index}</span>`;
     let location = '', city = '', road = '', description = permitString;
 
-    // 1. Ekstrakcja Miasta (w nawiasie)
     const cityMatch = permitString.match(/\(([^)]+)\)/);
     if (cityMatch) {
         city = cityMatch[1];
-        // Usuń miasto z całego stringu
         permitString = permitString.replace(`(${cityMatch[1]})`, '').trim();
     }
 
-    // 2. Podział na Lokalizację i Drogę
     const roadMatch = permitString.match(/- droga: ([^|]+)/);
     if (roadMatch) {
         road = roadMatch[1].trim();
-        // Usuń drogę ze stringu
         permitString = permitString.replace(roadMatch[0], '').trim();
     }
 
-    // Co zostało, to Lokalizacja/Nazwa
     location = permitString.split(' | Przekroczenie')[0].trim();
     description = permitString;
-
 
     html += `<div style="flex:1;">`;
     if (location) html += `<div class="permit-location">${escapeHtml(location)}</div>`;
@@ -1487,7 +1726,6 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// P6 FIX: Poprawiony widok pełnej walidacji (wyświetla listę infrastruktury)
 async function showFullValidation(routeId) {
     const validation = await getRouteValidation(routeId);
     if (!validation || !validation.validationAvailable) {
@@ -1498,7 +1736,6 @@ async function showFullValidation(routeId) {
     let html = '<div style="max-height: 75vh; overflow-y: auto; padding: 20px;">';
     html += `<h3 style="color:#0d6efd;border-bottom:3px solid #0d6efd;padding-bottom:10px;">Pełna Walidacja Trasy #${routeId}</h3>`;
 
-    // Transport Info Section
     if (validation.transportSetInfo) {
         const info = validation.transportSetInfo;
         html += '<div style="background:#e7f3ff;padding:20px;border-radius:8px;margin:20px 0;border:2px solid #0d6efd;">';
@@ -1510,7 +1747,6 @@ async function showFullValidation(routeId) {
         html += '</ul></div>';
     }
 
-    // Infrastructure Details Section (P6 FIX: Zawsze wyświetla detale)
     if (validation.infrastructureDetails && validation.infrastructureDetails.length > 0) {
         const infrastructureDetails = validation.infrastructureDetails;
         const blockedCount = infrastructureDetails.filter(d => d.canPass === false).length;
@@ -1546,7 +1782,6 @@ async function showFullValidation(routeId) {
     }
 
 
-    // Permits Section
     if (validation.permits && validation.permits.length > 0) {
         html += '<div style="background:#fff3cd;padding:20px;border-radius:8px;margin-top:20px;border:2px solid #ffc107;">';
         html += `<h5 style="color:#856404;"><strong>⚠️ WYMAGANE POZWOLENIA (${validation.permits.length}):</strong></h5>`;
@@ -1555,7 +1790,6 @@ async function showFullValidation(routeId) {
         html += '</ul></div>';
     }
 
-    // Justification Section (P5 FIX: zawsze jest dostępna)
     if (validation.routeJustification && validation.routeJustification.length > 0) {
         html += '<div style="background:#f8f9fa;padding:20px;border-radius:8px;margin-top:20px;border:2px solid #28a745;">';
         html += '<h5 style="color:#28a745;"><strong>DLACZEGO WYBRANO TĘ TRASĘ?</strong></h5>';
@@ -1571,7 +1805,6 @@ async function showFullValidation(routeId) {
         html += '</div></div>';
     }
 
-
     if (validation.violations && validation.violations.length > 0) {
         html += '<div style="background:#f8d7da;border-left:4px solid #dc3545;padding:15px;margin-top:20px;border-radius:5px;">';
         html += '<h6 style="color:#721c24;"><strong>Naruszenia (wystąpiły błędy mapowania / brak alternatywy):</strong></h6><ul>';
@@ -1579,7 +1812,6 @@ async function showFullValidation(routeId) {
         html += '</ul></div>';
     }
 
-    // Obsługa przypadku lekkiego pojazdu
     if (validation.lightVehicle) {
         html += '<div style="background:#d1ecf1;border-left:4px solid #0c5460;padding:15px;margin-top:20px;border-radius:5px;">';
         html += '<h6 style="color:#0c5460;"><strong>ℹ️ Pojazd lekki</strong></h6><p>Walidacja mostów i nośności została pominięta.</p>';
@@ -1610,7 +1842,7 @@ async function showRouteOnMap(routeId) {
         modal.style.display = 'flex';
 
         const mapDiv = document.getElementById('route-preview-map');
-        mapDiv.innerHTML = ''; // Wyczyść stary kontener
+        mapDiv.innerHTML = '';
         operatorDashboard.routePreviewMap = new google.maps.Map(mapDiv, {
             zoom: 10,
             center: { lat: data.startLat, lng: data.startLng }
@@ -1664,83 +1896,6 @@ function closeRouteMapModal() {
     const mapDiv = document.getElementById('route-preview-map');
     if (mapDiv) mapDiv.innerHTML = '';
     operatorDashboard.routePreviewMap = null;
-}
-
-async function showDriverLocation(driverUsername) {
-    console.log(`🗺️ Otwieram mapę dla kierowcy: ${driverUsername}`);
-    operatorDashboard.currentTrackedDriver = driverUsername;
-    const modal = document.getElementById('driver-location-modal');
-    document.getElementById('driver-location-title').textContent = `📍 Lokalizacja kierowcy: ${driverUsername}`;
-    modal.style.display = 'flex';
-
-    const mapDiv = document.getElementById('driver-location-map');
-    mapDiv.innerHTML = '';
-    operatorDashboard.driverLocationMap = new google.maps.Map(mapDiv, {
-        zoom: 16,
-        center: { lat: 52.2297, lng: 21.0122 }
-    });
-
-    await updateDriverLocation(driverUsername);
-    if (operatorDashboard.driverLocationInterval) clearInterval(operatorDashboard.driverLocationInterval);
-    operatorDashboard.driverLocationInterval = setInterval(() => {
-        if (operatorDashboard.currentTrackedDriver === driverUsername) {
-            updateDriverLocation(driverUsername);
-        }
-    }, 3000);
-}
-
-async function updateDriverLocation(driverUsername) {
-    try {
-        const response = await fetch(`/api/tracking/driver/${driverUsername}/status`);
-        if (!response.ok) throw new Error('Nie udało się pobrać lokalizacji');
-        const driverInfo = await response.json();
-        if (!driverInfo.isOnline || !driverInfo.latitude || !driverInfo.longitude) {
-            document.getElementById('driver-status-live').textContent = '⚪ Offline';
-            document.getElementById('driver-status-live').style.color = '#6c757d';
-            return;
-        }
-        const position = { lat: driverInfo.latitude, lng: driverInfo.longitude };
-        document.getElementById('driver-speed').textContent = `${Math.round(driverInfo.speedKmh || 0)} km/h`;
-        if (driverInfo.lastUpdate) {
-            const lastUpdate = new Date(driverInfo.lastUpdate);
-            const now = new Date();
-            const diffSeconds = Math.floor((now - lastUpdate) / 1000);
-            if (diffSeconds < 10) document.getElementById('driver-last-update').textContent = 'teraz';
-            else if (diffSeconds < 60) document.getElementById('driver-last-update').textContent = `${diffSeconds}s temu`;
-            else document.getElementById('driver-last-update').textContent = `${Math.floor(diffSeconds / 60)}m temu`;
-        }
-        document.getElementById('driver-status-live').textContent = '🟢 Online';
-        document.getElementById('driver-status-live').style.color = '#28a745';
-
-        if (operatorDashboard.driverLocationMarker) {
-            operatorDashboard.driverLocationMarker.setPosition(position);
-        } else {
-            operatorDashboard.driverLocationMarker = new google.maps.Marker({
-                position: position,
-                map: operatorDashboard.driverLocationMap,
-                title: `Kierowca: ${driverUsername}`,
-                icon: { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#4285F4', fillOpacity: 1, strokeColor: 'white', strokeWeight: 3 }
-            });
-        }
-        operatorDashboard.driverLocationMap.panTo(position);
-    } catch (error) {
-        document.getElementById('driver-status-live').textContent = '❌ Błąd';
-        document.getElementById('driver-status-live').style.color = '#dc3545';
-    }
-}
-
-function closeDriverLocationModal() {
-    document.getElementById('driver-location-modal').style.display = 'none';
-    if (operatorDashboard.driverLocationInterval) clearInterval(operatorDashboard.driverLocationInterval);
-    operatorDashboard.driverLocationInterval = null;
-    operatorDashboard.currentTrackedDriver = null;
-    if (operatorDashboard.driverLocationMarker) {
-        operatorDashboard.driverLocationMarker.setMap(null);
-        operatorDashboard.driverLocationMarker = null;
-    }
-    const mapDiv = document.getElementById('driver-location-map');
-    if (mapDiv) mapDiv.innerHTML = '';
-    operatorDashboard.driverLocationMap = null;
 }
 
 function decodeHereFlexiblePolyline(encoded) {
@@ -1797,19 +1952,10 @@ function decodeGooglePolyline(encoded) {
     return coordinates;
 }
 
-function logout() {
-    if (confirm('Czy na pewno chcesz się wylogować?')) {
-        if (operatorDashboard?.destroy) operatorDashboard.destroy();
-        localStorage.clear();
-        window.location.href = '/login.html';
-    }
-}
-
 window.addEventListener('beforeunload', () => {
     if (operatorDashboard?.driverLocationInterval) {
         clearInterval(operatorDashboard.driverLocationInterval);
     }
 });
 
-// Start aplikacji
 document.addEventListener('DOMContentLoaded', initializeSystem);
