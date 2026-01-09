@@ -144,6 +144,7 @@ public class RouteService {
 
     /**
      * ✅✅✅ GŁÓWNA METODA - INTELIGENTNE WYSZUKIWANIE TRASY ✅✅✅
+     * Z poprawką obsługi krytycznych błędów infrastruktury (Overpass Fail-Fast)
      */
     private RouteResponse createHeavyVehicleRouteWithValidation(
             CreateRouteRequest request,
@@ -157,7 +158,7 @@ public class RouteService {
 
         List<RouteAttemptReport> allAttempts = new ArrayList<>();
         Set<String> excludedInfrastructure = new HashSet<>();
-        Set<String> forceAcceptedPoints = new HashSet<>(); // ✅ P2 FIX: Punkty zaakceptowane przez operatora
+        Set<String> forceAcceptedPoints = new HashSet<>();
         Map<String, Object> validatedRouteData = null;
 
         // ============================================================================
@@ -173,8 +174,8 @@ public class RouteService {
                     request.getStartAddress(),
                     request.getEndAddress(),
                     transportSet,
-                    new HashSet<>(), // Brak wykluczeń
-                    true // ✅ PREFERUJ AUTOSTRADY
+                    new HashSet<>(),
+                    true
             );
 
             RouteAttemptReport attemptReport = validateRouteBeforeSaving(
@@ -184,38 +185,40 @@ public class RouteService {
             allAttempts.add(attemptReport);
 
             if (attemptReport.isFullyPassable()) {
-                log.info("╔════════════════════════════════════════════════════════════╗");
-                log.info("║  🎉 SUKCES! ZNALEZIONO OPTYMALNĄ TRASĘ (AUTOSTRADY)       ║");
-                log.info("║  ✅ Próba #1 zakończona sukcesem                          ║");
-                log.info("╚════════════════════════════════════════════════════════════╝");
-
+                log.info("🎉 SUKCES! ZNALEZIONO OPTYMALNĄ TRASĘ (AUTOSTRADY)");
                 routeData.put("searchAttempts", 1);
                 routeData.put("attemptReports", allAttempts);
                 routeData.put("validationCompleted", true);
                 routeData.put("createdAt", LocalDateTime.now().toString());
                 routeData.put("initialGoogleRoute", initialGoogleRoute);
                 routeData.put("routeType", "OPTIMAL_HIGHWAY");
-                // P5 FIX: Dodaj uzasadnienie do RouteData
                 routeData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(transportSet.getTotalWeightKg() / 1000.0)));
 
                 return saveValidatedRoute(request, transportSet, createdByUsername, routeData);
             }
 
-            // Trasa autostradowa jest zablokowana
             log.warn("⚠️  Trasa autostradowa ma przeszkody - rozpoczynam szukanie alternatyw");
-
             List<String> criticalBridges = attemptReport.getCriticalBridges();
             if (!criticalBridges.isEmpty()) {
                 excludedInfrastructure.addAll(criticalBridges);
-                log.info("🚫 Wykluczam {} obiektów z próby #1", criticalBridges.size());
             }
 
+        } catch (RuntimeException e) {
+            // ✅ POPRAWKA: Przechwycenie błędu z OverpassService (np. Timeout/Max Retries)
+            log.error("💥 KRYTYCZNY BŁĄD INFRASTRUKTURY (OVERPASS): {}", e.getMessage());
+            RouteAttemptReport errorReport = new RouteAttemptReport();
+            errorReport.setAttemptNumber(1);
+            errorReport.setError("BŁĄD API INFRASTRUKTURY: " + e.getMessage());
+            allAttempts.add(errorReport);
+
+            // Nie robimy kolejnych prób, bo API infrastruktury nie działa - od razu Draft
+            return saveDraftRouteWithProblems(request, transportSet, createdByUsername, initialGoogleRoute, allAttempts);
+
         } catch (Exception e) {
-            log.error("❌ Błąd w próbie #1: {}", e.getMessage());
+            log.error("❌ Błąd ogólny w próbie #1: {}", e.getMessage());
             RouteAttemptReport errorReport = new RouteAttemptReport();
             errorReport.setAttemptNumber(1);
             errorReport.setError(e.getMessage());
-            errorReport.setPreferredHighways(true);
             allAttempts.add(errorReport);
         }
 
@@ -223,24 +226,16 @@ public class RouteService {
         // KROK 2: PĘTLA WYSZUKIWANIA ALTERNATYW (PRÓBY #2 DO #N)
         // ============================================================================
 
-        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         log.info("🔄 ROZPOCZYNAM WYSZUKIWANIE TRAS ALTERNATYWNYCH");
-        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         for (int attempt = 2; attempt <= MAX_ROUTE_ATTEMPTS; attempt++) {
-            log.info("┌────────────────────────────────────────────────────────────┐");
-            log.info("│ 🔍 PRÓBA #{} - Szukanie trasy alternatywnej                │", attempt);
-            log.info("│ 🚫 Wykluczonych obiektów: {}                               │", excludedInfrastructure.size());
-            log.info("│ ✅ Wymuszonych zaakceptowanych: {}                          │", forceAcceptedPoints.size());
-            log.info("└────────────────────────────────────────────────────────────┘");
-
             try {
                 Map<String, Object> routeData = googleMapsService.getRoute(
                         request.getStartAddress(),
                         request.getEndAddress(),
                         transportSet,
-                        excludedInfrastructure, // Wykluczamy znalezione przeszkody
-                        false // ✅ NIE preferuj autostrad - szukaj JAKIEJKOLWIEK drogi
+                        excludedInfrastructure,
+                        false
                 );
 
                 RouteAttemptReport attemptReport = validateRouteBeforeSaving(
@@ -250,54 +245,44 @@ public class RouteService {
                 allAttempts.add(attemptReport);
 
                 if (attemptReport.isFullyPassable()) {
-                    log.info("╔════════════════════════════════════════════════════════════╗");
-                    log.info("║  🎉 SUKCES! ZNALEZIONO BEZPIECZNĄ TRASĘ ALTERNATYWNĄ      ║");
-                    log.info("║  ✅ Próba #{} zakończona sukcesem                         ║", attempt);
-                    log.info("╚════════════════════════════════════════════════════════════╝");
-
+                    log.info("🎉 SUKCES! ZNALEZIONO BEZPIECZNĄ TRASĘ ALTERNATYWNĄ w próbie #{}", attempt);
                     routeData.put("searchAttempts", attempt);
                     routeData.put("attemptReports", allAttempts);
                     routeData.put("validationCompleted", true);
-                    routeData.put("createdAt", LocalDateTime.now().toString());
                     routeData.put("initialGoogleRoute", initialGoogleRoute);
                     routeData.put("routeType", "ALTERNATIVE_SAFE");
-                    routeData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(transportSet.getTotalWeightKg() / 1000.0))); // P5 FIX
+                    routeData.put("routeJustification", List.of(militaryRoadPermissions.getRouteRecommendation(transportSet.getTotalWeightKg() / 1000.0)));
 
                     return saveValidatedRoute(request, transportSet, createdByUsername, routeData);
                 }
 
-                // Trasa nadal ma przeszkody
                 List<String> newCriticalBridges = attemptReport.getCriticalBridges();
-
-                if (newCriticalBridges.isEmpty()) {
-                    log.warn("⚠️  Google Maps nie znalazł więcej tras (lub wystąpił błąd walidacji) - przerywam pętlę");
-                    break;
-                }
-
-                int beforeSize = excludedInfrastructure.size();
+                if (newCriticalBridges.isEmpty()) break;
                 excludedInfrastructure.addAll(newCriticalBridges);
-                int addedCount = excludedInfrastructure.size() - beforeSize;
 
-                if (addedCount == 0) {
-                    log.warn("⚠️  Nie dodano nowych wykluczeń (pętla) - przerywam");
-                    break;
-                }
-
-                log.info("🚫 Wykluczam dodatkowo {} nowych obiektów", addedCount);
+            } catch (RuntimeException e) {
+                // ✅ POPRAWKA: Obsługa błędu infrastruktury w pętli
+                log.error("💥 Przerwanie pętli - błąd Overpass w próbie #{}: {}", attempt, e.getMessage());
+                RouteAttemptReport errorReport = new RouteAttemptReport();
+                errorReport.setAttemptNumber(attempt);
+                errorReport.setError("Krytyczny błąd API: " + e.getMessage());
+                allAttempts.add(errorReport);
+                break; // Wychodzimy z pętli do kroku 3 (Draft)
 
             } catch (Exception e) {
                 log.error("❌ Błąd w próbie #{}: {}", attempt, e.getMessage());
                 RouteAttemptReport errorReport = new RouteAttemptReport();
                 errorReport.setAttemptNumber(attempt);
                 errorReport.setError(e.getMessage());
-                errorReport.setPreferredHighways(false);
                 allAttempts.add(errorReport);
             }
         }
 
         // ============================================================================
-        // KROK 3: OSTATECZNA PORAŻKA - DRAFT DLA OPERATORA
+        // KROK 3: OSTATECZNA PORAŻKA LUB BŁĄD API - DRAFT DLA OPERATORA
         // ============================================================================
+
+
 
         log.info("╔════════════════════════════════════════════════════════════╗");
         log.info("║  ⚠️  WYCZERPANO WSZYSTKIE PRÓBY AUTOMATYCZNEGO WYSZUKIWANIA║");
@@ -1015,7 +1000,7 @@ public class RouteService {
     }
 
     private String escapeXml(String text) {
-        if (text == null) return "";
+        if (text == null) return ""; // To naprawia błąd Javy
         return text.replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
@@ -1541,30 +1526,58 @@ public class RouteService {
         }
     }
 
+    /**
+     * ✅ TWORZY SZCZEGÓŁOWY OBIEKT PUNKTU ODRZUCONEGO DLA OPERATORA
+     * Metoda wzbogaca prostą informację o blokadzie o konkretne limity techniczne.
+     */
     private Map<String, Object> createRejectedPointDetail(String pointName, Map<String, Object> infraPoint, boolean isRevalidated) {
         Map<String, Object> rejectedPoint = new HashMap<>();
         rejectedPoint.put("name", pointName);
+
+        // Oznaczamy, w której próbie wykryto problem (ułatwia debugowanie ścieżek)
         rejectedPoint.put("firstSeenAttempt", isRevalidated ? 100 : 1);
 
-        String reason = (String) infraPoint.getOrDefault("violation", "Przekroczone parametry");
-        Double maxWeight = (Double) infraPoint.get("maxWeightTons");
-        Double maxHeight = (Double) infraPoint.get("maxHeightMeters");
+        // 1. Pobieranie danych o naruszeniu z mapy infrastruktury
+        // Jeśli infraPoint nie ma klucza 'violation', ustawiamy domyślny komunikat
+        String reason = (String) infraPoint.getOrDefault("violation", "Przekroczone parametry techniczne obiektu");
 
+        // Wyciąganie surowych limitów (używane do badge'y na frontendzie)
+        Double maxWeight = null;
+        if (infraPoint.get("maxWeightTons") != null) {
+            maxWeight = ((Number) infraPoint.get("maxWeightTons")).doubleValue();
+        }
+
+        Double maxHeight = null;
+        if (infraPoint.get("maxHeightMeters") != null) {
+            maxHeight = ((Number) infraPoint.get("maxHeightMeters")).doubleValue();
+        }
+
+        // 2. Budowanie czytelnego opisu tekstowego dla operatora
         StringBuilder reasonStr = new StringBuilder(reason);
-        if (maxWeight != null) {
+
+        if (maxWeight != null && maxWeight > 0) {
             reasonStr.append(String.format(" (Limit nośności: %.1ft)", maxWeight));
         }
-        if (maxHeight != null) {
+        if (maxHeight != null && maxHeight > 0) {
             reasonStr.append(String.format(" (Limit wysokości: %.2fm)", maxHeight));
         }
 
+        // 3. Pakowanie danych do mapy wynikowej
+        // Dodajemy surowe dane, aby frontend mógł wyliczyć % przekroczenia
+        rejectedPoint.put("limitWeight", maxWeight);
+        rejectedPoint.put("limitHeight", maxHeight);
+
+        // Frontend oczekuje listy Stringów w polu 'reason'
         rejectedPoint.put("reason", List.of(reasonStr.toString()));
+
+        // Parametry sterujące logiką akceptacji w dashboardzie
         rejectedPoint.put("canBeAccepted", true);
         rejectedPoint.put("foundDuringRevalidation", isRevalidated);
+
+        log.debug("🔍 Przygotowano szczegóły punktu odrzuconego: {} - {}", pointName, reasonStr);
+
         return rejectedPoint;
     }
-
-
     /**
      * ✅ KLASA DTO - Decyzja operatora dla pojedynczego punktu
      */

@@ -19,6 +19,13 @@ public class TransportSet {
     @JoinColumn(name = "cargo_id")
     private Vehicle cargo;
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NOWE POLE - Odniesienie do konkretnej naczepy
+    // ═══════════════════════════════════════════════════════════════════════════
+    @ManyToOne
+    @JoinColumn(name = "trailer_id")
+    private Trailer trailer;
+
     private String description;
 
     private Integer totalHeightCm;
@@ -31,6 +38,16 @@ public class TransportSet {
     // ✅ NOWE POLE - wymuszenie jazdy na własnych kołach
     private Boolean forceSelfDriving = false;
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * GŁÓWNA METODA OBLICZANIA PARAMETRÓW ZESTAWU TRANSPORTOWEGO
+     *
+     * Uwzględnia trzy źródła danych:
+     * 1. Transporter (ciągnik) - Vehicle
+     * 2. Cargo (ładunek) - Vehicle
+     * 3. Trailer (naczepa) - Trailer (NOWE!)
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
     public void calculateTransportParameters() {
         if (transporter == null || cargo == null) {
             return;
@@ -52,6 +69,9 @@ public class TransportSet {
         }
     }
 
+    /**
+     * Obliczenia dla pojazdu jadącego samodzielnie (bez naczepy)
+     */
     private void calculateSelfDrivingParameters() {
         // STANDALONE: Lekki pojazd jedzie sam (Humvee, Sprinter)
         this.totalWeightKg = cargo.getTotalWeightKg();
@@ -62,21 +82,92 @@ public class TransportSet {
         this.trailerHeightCm = 0;
     }
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * ZMODYFIKOWANA METODA - Obliczenia dla zestawu z naczepą
+     *
+     * Jeśli naczepa jest przypisana, używa jej RZECZYWISTYCH parametrów.
+     * W przeciwnym razie używa estymacji (dla kompatybilności wstecznej).
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
     private void calculateTrailerParameters() {
-        // ZESTAW Z NACZEPĄ (ciężkie pojazdy lub transport długodystansowy)
-        this.trailerHeightCm = estimateTrailerHeight(cargo.getTotalWeightKg());
-        this.totalHeightCm = this.trailerHeightCm + (cargo.getHeightCm() != null ? cargo.getHeightCm() : 0);
+        // ═══════════════════════════════════════════════════════════════════════
+        // WAGA CAŁKOWITA ZESTAWU
+        // W_całkowita = W_ciągnik_pusty + W_naczepa_pusta + W_ładunek + W_wyposażenie
+        // ═══════════════════════════════════════════════════════════════════════
 
-        // Składowe masy
-        int tractorWeight = (int) (transporter.getTotalWeightKg() * 0.4); // Pusty ciągnik
+        // Masa pustego ciągnika (szacowana jako 40% DMC)
+        int tractorWeight = (int) (transporter.getTotalWeightKg() * 0.4);
+
+        // Masa ładunku
         int cargoWeight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
-        int semiTrailerWeight = estimateSemiTrailerWeight(cargoWeight);
+
+        // Masa naczepy - używamy rzeczywistych danych jeśli dostępne
+        int trailerWeight;
+        if (trailer != null && trailer.getEmptyWeight() != null) {
+            trailerWeight = trailer.getEmptyWeight();
+        } else {
+            trailerWeight = estimateSemiTrailerWeight(cargoWeight);
+        }
+
+        // Dodatkowe wyposażenie wojskowe
         int militaryEquipmentWeight = estimateMilitaryEquipment(cargo.getModel());
 
-        this.totalWeightKg = tractorWeight + semiTrailerWeight + cargoWeight + militaryEquipmentWeight;
+        this.totalWeightKg = tractorWeight + trailerWeight + cargoWeight + militaryEquipmentWeight;
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // WYSOKOŚĆ ZESTAWU
+        // H_zestawu = max(H_ciągnik, H_naczepa_pusta + H_ładunek)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        int trailerUnloadedHeightCm;
+        if (trailer != null && trailer.getUnloadedHeightCm() != null) {
+            trailerUnloadedHeightCm = trailer.getUnloadedHeightCm();
+        } else {
+            trailerUnloadedHeightCm = estimateTrailerHeight(cargoWeight);
+        }
+        this.trailerHeightCm = trailerUnloadedHeightCm;
+
+        int cargoHeightCm = cargo.getHeightCm() != null ? cargo.getHeightCm() : 0;
+        int transporterHeightCm = transporter.getHeightCm() != null ? transporter.getHeightCm() : 0;
+
+        // Wysokość zestawu = max(wysokość ciągnika, wysokość naczepy + ładunek)
+        int heightWithCargo = trailerUnloadedHeightCm + cargoHeightCm;
+        this.totalHeightCm = Math.max(transporterHeightCm, heightWithCargo);
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // DŁUGOŚĆ ZESTAWU
+        // L_zestawu = L_ciągnik + L_naczepa (lub estymacja)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        if (trailer != null && trailer.getLengthCm() != null) {
+            int truckLength = 650; // Standardowa długość ciągnika 6x4 (6.5m)
+            this.totalLengthCm = truckLength + trailer.getLengthCm();
+        } else {
+            this.totalLengthCm = estimateTotalLength();
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SZEROKOŚĆ ZESTAWU
+        // W_zestawu = max(W_ciągnik, W_naczepa, W_ładunek)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        int trailerWidthCm = 255; // Domyślna szerokość naczepy
+        if (trailer != null && trailer.getWidthCm() != null) {
+            trailerWidthCm = trailer.getWidthCm();
+        }
+
+        this.totalWidthCm = Math.max(
+                Math.max(estimateTransporterWidth(), trailerWidthCm),
+                estimateCargoWidth()
+        );
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // NACISK NA OSIE
+        // Używamy rzeczywistej liczby osi naczepy jeśli dostępna
+        // ═══════════════════════════════════════════════════════════════════════
+
         this.maxAxleLoadKg = calculateMaxAxleLoad(this.totalWeightKg, getAxleCount());
-        this.totalLengthCm = estimateTotalLength();
-        this.totalWidthCm = Math.max(estimateTransporterWidth(), estimateCargoWidth());
     }
 
     /**
@@ -154,17 +245,29 @@ public class TransportSet {
         return (int) (baseAxleLoad * 1.2);
     }
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * ZMODYFIKOWANA METODA - Liczba osi zestawu
+     * Używa rzeczywistej liczby osi naczepy jeśli dostępna
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
     private int getAxleCount() {
-        int cargoWeight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
         int truckAxles = 3; // Typowo 6x4 ciągnik
         int trailerAxles;
 
-        if (cargoWeight > 50000) {
-            trailerAxles = 4; // 4-osiowa dla czołgów
-        } else if (cargoWeight > 30000) {
-            trailerAxles = 3; // 3-osiowa
+        // Używamy rzeczywistej liczby osi naczepy jeśli dostępna
+        if (trailer != null && trailer.getNumberOfAxles() != null) {
+            trailerAxles = trailer.getNumberOfAxles();
         } else {
-            trailerAxles = 2; // Standardowa
+            // Estymacja na podstawie wagi ładunku
+            int cargoWeight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
+            if (cargoWeight > 50000) {
+                trailerAxles = 4; // 4-osiowa dla czołgów
+            } else if (cargoWeight > 30000) {
+                trailerAxles = 3; // 3-osiowa
+            } else {
+                trailerAxles = 2; // Standardowa
+            }
         }
 
         return truckAxles + trailerAxles;
@@ -234,6 +337,11 @@ public class TransportSet {
                 cargo.getTotalWeightKg() > 45000;
     }
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * ZMODYFIKOWANA METODA - Typ naczepy z uwzględnieniem rzeczywistej naczepy
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
     public String getTrailerType() {
         if (Boolean.TRUE.equals(forceSelfDriving)) {
             return "Pojazd jedzie na własnych kołach (wymuszony)";
@@ -242,6 +350,13 @@ public class TransportSet {
         if (!shouldBeOnTrailer() && Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
             return "Pojazd samojezdny (bez naczepy)";
         }
+
+        // Jeśli mamy przypisaną rzeczywistą naczepę, użyj jej typu
+        if (trailer != null && trailer.getType() != null) {
+            return "Naczepa: " + trailer.getType() + " (" + trailer.getRegistrationNumber() + ")";
+        }
+
+        // Fallback do estymacji
         if (isLowLoader()) {
             return "Naczepa niskopodwoziowa";
         }
@@ -251,14 +366,94 @@ public class TransportSet {
         return "Naczepa standardowa";
     }
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * ZMODYFIKOWANA METODA - Szczegółowy opis wysokości
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
     public String getHeightBreakdown() {
         if (Boolean.TRUE.equals(forceSelfDriving) ||
                 (!shouldBeOnTrailer() && Boolean.TRUE.equals(cargo.getCanDriveAlone()))) {
             return String.format("Wysokość pojazdu: %dcm (jedzie samodzielnie)", getTotalHeightCm());
         }
-        return String.format("Wysokość całkowita: %dcm (naczepa %dcm + ładunek %dcm)",
+
+        String trailerInfo = "";
+        if (trailer != null) {
+            trailerInfo = String.format(" [%s]", trailer.getRegistrationNumber());
+        }
+
+        return String.format("Wysokość całkowita: %dcm (naczepa %dcm + ładunek %dcm)%s",
                 getTotalHeightCm(),
                 getTrailerHeightCm(),
-                cargo.getHeightCm());
+                cargo.getHeightCm(),
+                trailerInfo);
+    }
+
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * NOWA METODA - Szczegółowy opis wagi zestawu
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
+    public String getWeightBreakdown() {
+        if (Boolean.TRUE.equals(forceSelfDriving) ||
+                (!shouldBeOnTrailer() && Boolean.TRUE.equals(cargo.getCanDriveAlone()))) {
+            return String.format("Masa pojazdu: %dkg (jedzie samodzielnie)", getTotalWeightKg());
+        }
+
+        int tractorWeight = (int) (transporter.getTotalWeightKg() * 0.4);
+        int cargoWeight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
+        int trailerWeight;
+        String trailerInfo;
+
+        if (trailer != null && trailer.getEmptyWeight() != null) {
+            trailerWeight = trailer.getEmptyWeight();
+            trailerInfo = String.format(" [%s]", trailer.getRegistrationNumber());
+        } else {
+            trailerWeight = estimateSemiTrailerWeight(cargoWeight);
+            trailerInfo = " [estymacja]";
+        }
+
+        int equipmentWeight = estimateMilitaryEquipment(cargo.getModel());
+
+        return String.format("Masa całkowita: %dkg (ciągnik ~%dkg + naczepa %dkg%s + ładunek %dkg + wyposażenie %dkg)",
+                getTotalWeightKg(),
+                tractorWeight,
+                trailerWeight,
+                trailerInfo,
+                cargoWeight,
+                equipmentWeight);
+    }
+
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * NOWA METODA - Szczegółowy opis osi zestawu
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
+    public String getAxleBreakdown() {
+        int truckAxles = 3;
+        int trailerAxles;
+        String trailerInfo;
+
+        if (trailer != null && trailer.getNumberOfAxles() != null) {
+            trailerAxles = trailer.getNumberOfAxles();
+            trailerInfo = String.format(" [%s]", trailer.getRegistrationNumber());
+        } else {
+            int cargoWeight = cargo.getTotalWeightKg() != null ? cargo.getTotalWeightKg() : 0;
+            if (cargoWeight > 50000) {
+                trailerAxles = 4;
+            } else if (cargoWeight > 30000) {
+                trailerAxles = 3;
+            } else {
+                trailerAxles = 2;
+            }
+            trailerInfo = " [estymacja]";
+        }
+
+        return String.format("Osie: %d (ciągnik %d + naczepa %d%s), Max nacisk: %dkg/oś",
+                truckAxles + trailerAxles,
+                truckAxles,
+                trailerAxles,
+                trailerInfo,
+                getMaxAxleLoadKg());
     }
 }

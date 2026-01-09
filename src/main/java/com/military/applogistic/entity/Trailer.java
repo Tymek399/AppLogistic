@@ -22,12 +22,32 @@ public class Trailer {
     private Integer maxPayload; // Waga (kg)
     private Double length;      // Długość (m)
     private Double width;       // Szerokość (m)
-    private Double height;      // Wysokość (m)
+    private Double height;      // Wysokość (m) - wysokość z ładunkiem
 
-    // Konstruktory (wymagany jest domyślny dla JPA)
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NOWE POLA - wymagane dla pełnej walidacji zestawu transportowego
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Liczba osi naczepy - używana do obliczania nacisków na osie
+     */
+    private Integer numberOfAxles;
+
+    /**
+     * Wysokość naczepy bez ładunku (w metrach) - używana do walidacji tuneli
+     * Wysokość całkowita zestawu = max(wysokość_ciągnika, wysokość_naczepy_pusta + wysokość_ładunku)
+     */
+    private Double unloadedHeight;
+
+    /**
+     * Masa własna naczepy (w kg) - używana do obliczania całkowitej masy zestawu
+     */
+    private Integer emptyWeight;
+
+    // Konstruktory
     public Trailer() {}
 
-    // Konstruktor do tworzenia obiektu
+    // Konstruktor podstawowy (bez nowych pól - dla kompatybilności wstecznej)
     public Trailer(String registrationNumber, String type, String vin, Integer maxPayload, Double length, Double width, Double height) {
         this.registrationNumber = registrationNumber;
         this.type = type;
@@ -38,7 +58,23 @@ public class Trailer {
         this.height = height;
     }
 
-    // --- GETTERY I SETTERY (Wymagane przez Spring/Jackson) ---
+    // Konstruktor pełny (z nowymi polami)
+    public Trailer(String registrationNumber, String type, String vin, Integer maxPayload,
+                   Double length, Double width, Double height,
+                   Integer numberOfAxles, Double unloadedHeight, Integer emptyWeight) {
+        this.registrationNumber = registrationNumber;
+        this.type = type;
+        this.vin = vin;
+        this.maxPayload = maxPayload;
+        this.length = length;
+        this.width = width;
+        this.height = height;
+        this.numberOfAxles = numberOfAxles;
+        this.unloadedHeight = unloadedHeight;
+        this.emptyWeight = emptyWeight;
+    }
+
+    // --- GETTERY I SETTERY ---
 
     public Long getId() {
         return id;
@@ -102,5 +138,77 @@ public class Trailer {
 
     public void setHeight(Double height) {
         this.height = height;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GETTERY I SETTERY DLA NOWYCH PÓL
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public Integer getNumberOfAxles() {
+        return numberOfAxles;
+    }
+
+    public void setNumberOfAxles(Integer numberOfAxles) {
+        this.numberOfAxles = numberOfAxles;
+    }
+
+    public Double getUnloadedHeight() {
+        return unloadedHeight;
+    }
+
+    public void setUnloadedHeight(Double unloadedHeight) {
+        this.unloadedHeight = unloadedHeight;
+    }
+
+    public Integer getEmptyWeight() {
+        return emptyWeight;
+    }
+
+    public void setEmptyWeight(Integer emptyWeight) {
+        this.emptyWeight = emptyWeight;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // METODY POMOCNICZE
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Zwraca wysokość naczepy bez ładunku w centymetrach (do użycia w TransportSet)
+     */
+    public Integer getUnloadedHeightCm() {
+        if (unloadedHeight == null) {
+            return null;
+        }
+        return (int) (unloadedHeight * 100);
+    }
+
+    /**
+     * Zwraca długość naczepy w centymetrach
+     */
+    public Integer getLengthCm() {
+        if (length == null) {
+            return null;
+        }
+        return (int) (length * 100);
+    }
+
+    /**
+     * Zwraca szerokość naczepy w centymetrach
+     */
+    public Integer getWidthCm() {
+        if (width == null) {
+            return null;
+        }
+        return (int) (width * 100);
+    }
+
+    /**
+     * Zwraca wysokość naczepy (z ładunkiem) w centymetrach
+     */
+    public Integer getHeightCm() {
+        if (height == null) {
+            return null;
+        }
+        return (int) (height * 100);
     }
 }

@@ -91,27 +91,10 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
-        .permit-location {
-            font-weight: bold;
-            color: #d63384;
-            font-size: 1.05em;
-        }
-
-        .permit-city {
-            color: #0d6efd;
-            font-weight: 600;
-        }
-
-        .permit-road {
-            color: #6c757d;
-            font-size: 0.9em;
-        }
-
-        .permit-description {
-            color: #495057;
-            margin-top: 5px;
-            font-size: 0.95em;
-        }
+        .permit-location { font-weight: bold; color: #d63384; font-size: 1.05em; }
+        .permit-city { color: #0d6efd; font-weight: 600; }
+        .permit-road { color: #6c757d; font-size: 0.9em; }
+        .permit-description { color: #495057; margin-top: 5px; font-size: 0.95em; }
 
         .btn-action {
             padding: 8px 16px;
@@ -164,17 +147,11 @@
             background: #e7f3ff;
         }
 
-        .transport-mode-icon {
-            font-size: 2em;
-            margin-right: 10px;
-        }
+        .transport-mode-icon { font-size: 2em; margin-right: 10px; }
 
         .route-map-modal {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.9);
             z-index: 9999;
             display: none;
@@ -204,23 +181,12 @@
             align-items: center;
         }
 
-        .route-map-body {
-            flex: 1;
-            position: relative;
-        }
+        .route-map-body { flex: 1; position: relative; }
+        #route-preview-map { width: 100%; height: 100%; }
 
-        #route-preview-map {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* Driver Location Modal */
         .driver-location-modal {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.9);
             z-index: 9999;
             display: none;
@@ -250,41 +216,37 @@
             align-items: center;
         }
 
-        .driver-location-stats {
-            display: flex;
-            gap: 30px;
+        .driver-location-stats { display: flex; gap: 30px; font-size: 0.9em; }
+        .driver-stat { display: flex; flex-direction: column; }
+        .driver-stat-label { color: #6c757d; font-size: 0.85em; }
+        .driver-stat-value { font-size: 1.3em; font-weight: bold; color: #0d6efd; }
+        .driver-location-body { flex: 1; position: relative; }
+        #driver-location-map { width: 100%; height: 100%; }
+        .btn-map-driver { margin-left: 10px; }
+
+        /* Nowe style dla parametrów technicznych naczepy */
+        .tech-params-section {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border: 2px solid #2196f3;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .tech-params-header {
+            color: #1565c0;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .typical-values-accordion .accordion-button {
+            padding: 8px 12px;
             font-size: 0.9em;
         }
 
-        .driver-stat {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .driver-stat-label {
-            color: #6c757d;
+        .typical-values-accordion .accordion-body {
             font-size: 0.85em;
-        }
-
-        .driver-stat-value {
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #0d6efd;
-        }
-
-        .driver-location-body {
-            flex: 1;
-            position: relative;
-        }
-
-        #driver-location-map {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* ✅ Dodatkowy styl dla przycisku mapy */
-        .btn-map-driver {
-            margin-left: 10px;
+            background: #f8f9fa;
         }
     </style>
 </head>
@@ -318,6 +280,9 @@
         </button>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- SEKCJA: ZARZĄDZANIE TRASAMI -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
     <div id="routes-section">
         <div class="row">
             <div class="col-md-4">
@@ -363,7 +328,6 @@
 
         <div class="row mt-4">
             <div class="col-md-12">
-
                 <div id="routes-requiring-acceptance" class="mb-4"></div>
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h3>Wszystkie Trasy</h3>
@@ -381,6 +345,9 @@
         </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- SEKCJA: KIEROWCY -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
     <div id="drivers-section" style="display: none;">
         <div class="row">
             <div class="col-md-12">
@@ -404,6 +371,9 @@
         </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- SEKCJA: ZESTAWY TRANSPORTOWE -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
     <div id="vehicles-section" style="display: none;">
         <div class="row">
             <div class="col-md-6">
@@ -483,8 +453,12 @@
         </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- SEKCJA: DODAJ SPRZĘT -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
     <div id="add-equipment-section" style="display: none;">
         <div class="row">
+            <!-- Formularz dodawania ciężarówki -->
             <div class="col-md-6">
                 <div class="card shadow">
                     <div class="card-header bg-success text-white">
@@ -514,6 +488,7 @@
                 </div>
             </div>
 
+            <!-- Formularz dodawania ładunku -->
             <div class="col-md-6">
                 <div class="card shadow">
                     <div class="card-header bg-warning text-dark">
@@ -544,49 +519,195 @@
             </div>
         </div>
 
+        <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+        <!-- ZAKTUALIZOWANY FORMULARZ NACZEPY Z NOWYMI POLAMI -->
+        <!-- ═══════════════════════════════════════════════════════════════════════════ -->
         <div class="row mt-4">
-            <div class="col-md-6">
+            <div class="col-md-8">
                 <div class="card shadow">
                     <div class="card-header bg-info text-white">
-                        <h5 class="mb-0">Dodaj Naczepę</h5>
+                        <h5 class="mb-0">🚛 Dodaj Naczepę</h5>
                     </div>
                     <div class="card-body">
                         <form id="add-trailer-form">
-                            <div class="mb-3">
-                                <label class="form-label">Nr Rejestracyjny</label>
-                                <input type="text" id="trailer-registration-number" class="form-control" required placeholder="np. WR 12345">
+                            <!-- Podstawowe informacje -->
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Nr Rejestracyjny <span class="text-danger">*</span></label>
+                                    <input type="text" id="trailer-registration-number" class="form-control" required placeholder="np. WR 12345">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Typ naczepy <span class="text-danger">*</span></label>
+                                    <select id="trailer-type" class="form-select" required>
+                                        <option value="">Wybierz typ...</option>
+                                        <option value="niskopodwoziowa">Niskopodwoziowa (heavy-duty)</option>
+                                        <option value="wzmocniona">Wzmocniona</option>
+                                        <option value="standardowa">Standardowa</option>
+                                        <option value="plandeka">Plandeka</option>
+                                        <option value="chlodnia">Chłodnia</option>
+                                        <option value="wywrotka">Wywrotka</option>
+                                        <option value="cysterna">Cysterna</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">VIN <span class="text-danger">*</span></label>
+                                    <input type="text" id="trailer-vin" class="form-control" required placeholder="np. ABC123456789">
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Typ Naczepy</label>
-                                <input type="text" id="trailer-type" class="form-control" placeholder="np. Plandeka, Chłodnia" required>
+
+                            <!-- Wymiary i ładowność -->
+                            <h6 class="text-muted mt-3 mb-2">📐 Wymiary i ładowność</h6>
+                            <div class="row">
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label">Max ładowność (kg) <span class="text-danger">*</span></label>
+                                    <input type="number" id="trailer-max-payload" class="form-control" required placeholder="np. 40000" min="1000" max="100000">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label">Długość (m) <span class="text-danger">*</span></label>
+                                    <input type="number" id="trailer-length" class="form-control" step="0.01" required placeholder="np. 13.6" min="1" max="25">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label">Szerokość (m) <span class="text-danger">*</span></label>
+                                    <input type="number" id="trailer-width" class="form-control" step="0.01" required placeholder="np. 2.55" min="1" max="5">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label">Wysokość całk. (m) <span class="text-danger">*</span></label>
+                                    <input type="number" id="trailer-height" class="form-control" step="0.01" required placeholder="np. 4.0" min="1" max="5">
+                                    <small class="text-muted">Z ładunkiem</small>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">VIN</label>
-                                <input type="text" id="trailer-vin" class="form-control" required>
+
+                            <!-- NOWE POLA - Parametry techniczne do walidacji trasy -->
+                            <div class="tech-params-section">
+                                <div class="tech-params-header">
+                                    ⚙️ Parametry techniczne (do walidacji trasy)
+                                </div>
+                                <div class="alert alert-info py-2 mb-3">
+                                    <small>
+                                        <strong>ℹ️ Te parametry są używane do precyzyjnego obliczania:</strong><br>
+                                        • Całkowitej masy zestawu (ciągnik + naczepa + ładunek)<br>
+                                        • Wysokości zestawu dla walidacji tuneli<br>
+                                        • Nacisku na osie dla walidacji mostów
+                                    </small>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Liczba osi <span class="text-danger">*</span></label>
+                                        <input type="number" id="trailer-axles" class="form-control" min="1" max="10" required placeholder="np. 3">
+                                        <small class="text-muted">Typowo 2-4 dla standardowych, 4-6 dla niskopodwoziowych</small>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Wysokość bez ładunku (m) <span class="text-danger">*</span></label>
+                                        <input type="number" id="trailer-unloaded-height" class="form-control" step="0.01" min="0.1" max="3" required placeholder="np. 1.2">
+                                        <small class="text-muted">Wysokość pustej platformy/podłogi</small>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Masa własna (kg) <span class="text-danger">*</span></label>
+                                        <input type="number" id="trailer-empty-weight" class="form-control" min="1000" max="30000" required placeholder="np. 12000">
+                                        <small class="text-muted">Waga pustej naczepy</small>
+                                    </div>
+                                </div>
+
+                                <!-- Accordion z typowymi wartościami -->
+                                <div class="accordion typical-values-accordion" id="typicalValuesAccordion">
+                                    <div class="accordion-item">
+                                        <h2 class="accordion-header">
+                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTypical">
+                                                📋 Podpowiedź: Typowe wartości dla różnych typów naczep
+                                            </button>
+                                        </h2>
+                                        <div id="collapseTypical" class="accordion-collapse collapse" data-bs-parent="#typicalValuesAccordion">
+                                            <div class="accordion-body">
+                                                <table class="table table-sm table-striped mb-0">
+                                                    <thead>
+                                                    <tr>
+                                                        <th>Typ naczepy</th>
+                                                        <th>Osie</th>
+                                                        <th>Wys. pusta</th>
+                                                        <th>Masa własna</th>
+                                                    </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                    <tr>
+                                                        <td><strong>Niskopodwoziowa</strong> (czołgi)</td>
+                                                        <td>4-6</td>
+                                                        <td>0.7-0.9m</td>
+                                                        <td>12-18t</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td><strong>Wzmocniona</strong></td>
+                                                        <td>3-4</td>
+                                                        <td>1.0-1.3m</td>
+                                                        <td>10-14t</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td><strong>Standardowa</strong></td>
+                                                        <td>2-3</td>
+                                                        <td>1.3-1.5m</td>
+                                                        <td>6-9t</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td><strong>Plandeka/Chłodnia</strong></td>
+                                                        <td>2-3</td>
+                                                        <td>1.4-1.6m</td>
+                                                        <td>7-10t</td>
+                                                    </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Max. Ładowność (kg)</label>
-                                <input type="number" id="trailer-max-payload" class="form-control" required placeholder="np. 24000">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Długość (m)</label>
-                                <input type="number" id="trailer-length" class="form-control" step="0.01" required placeholder="np. 13.6">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Szerokość (m)</label>
-                                <input type="number" id="trailer-width" class="form-control" step="0.01" required placeholder="np. 2.55">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Wysokość (m)</label>
-                                <input type="number" id="trailer-height" class="form-control" step="0.01" required placeholder="np. 4.0">
-                            </div>
-                            <button type="submit" class="btn btn-info w-100">Dodaj Naczepę</button>
+
+                            <button type="submit" class="btn btn-info w-100 mt-3">
+                                <strong>Dodaj Naczepę</strong>
+                            </button>
                         </form>
                     </div>
                 </div>
             </div>
-            <div class="col-md-6"></div>
+
+            <!-- Panel tworzenia zestawu transportowego -->
+            <div class="col-md-4">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">🚚 Utwórz Zestaw Transportowy</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="add-transport-set-form">
+                            <div class="mb-3">
+                                <label class="form-label">Ciągnik <span class="text-danger">*</span></label>
+                                <select id="transporter-select" class="form-select" required>
+                                    <option value="">Wybierz ciągnik...</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Ładunek <span class="text-danger">*</span></label>
+                                <select id="cargo-select" class="form-select" required>
+                                    <option value="">Wybierz ładunek...</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Naczepa <span class="text-danger">*</span></label>
+                                <select id="transport-set-trailer-select" class="form-select" required>
+                                    <option value="">Wybierz naczepę...</option>
+                                </select>
+                                <small class="text-muted">Parametry naczepy zostaną użyte do walidacji trasy</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Opis zestawu</label>
+                                <input type="text" id="set-description" class="form-control" placeholder="np. Transport Leopard 2A5">
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Utwórz Zestaw</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
         </div>
+
+        <!-- Listy istniejącego sprzętu -->
         <div class="row mt-4">
             <div class="col-md-6">
                 <h4>Ciężarówki</h4>
@@ -599,6 +720,9 @@
         </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- SEKCJA: NACZEPY -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
     <div id="trailers-section" style="display:none;">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h4 class="mb-0">Lista Zarejestrowanych Naczep</h4>
@@ -625,6 +749,11 @@
     </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- MODALE -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+<!-- Modal mapy trasy -->
 <div id="route-map-modal" class="route-map-modal">
     <div class="route-map-container">
         <div class="route-map-header">
@@ -637,6 +766,7 @@
     </div>
 </div>
 
+<!-- Modal lokalizacji kierowcy -->
 <div id="driver-location-modal" class="driver-location-modal">
     <div class="driver-location-container">
         <div class="driver-location-header">
@@ -665,6 +795,7 @@
     </div>
 </div>
 
+<!-- Modal dodawania kierowcy -->
 <div class="modal fade" id="addDriverModal" tabindex="-1" aria-labelledby="addDriverModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -706,6 +837,7 @@
     </div>
 </div>
 
+<!-- Modal przypisywania kierowcy -->
 <div class="modal fade" id="assignDriverModal" tabindex="-1" aria-labelledby="assignDriverModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -734,9 +866,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-
 <script src="/js/operator.js"></script>
-
 <script id="google-maps-script" async defer></script>
 </body>
 </html>

@@ -69,16 +69,12 @@ public class OverpassService {
 
         private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
             final double R = 6371000;
-
             double dLat = Math.toRadians(lat2 - lat1);
             double dLon = Math.toRadians(lon2 - lon1);
-
             double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
                     Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
                             Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
             double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
             return R * c;
         }
     }
@@ -106,30 +102,26 @@ public class OverpassService {
 
         String cacheKey = String.format("%.4f_%.4f_%.4f_%.4f", minLat, maxLat, minLng, maxLng);
         CachedResult cached = queryCache.get(cacheKey);
+
         if (cached != null && !cached.isExpired()) {
             log.info("✅ Używam cache dla infrastruktury (wiek: {}s)",
                     (System.currentTimeMillis() - cached.timestamp) / 1000);
             return filterPointsNearRoute(cached.getPoints(), routeCoordinates);
         }
 
-        try {
-            String query = buildOverpassQuery(minLat, maxLat, minLng, maxLng);
-            List<InfrastructurePoint> rawPoints = queryOverpassApiWithRetry(query);
+        String query = buildOverpassQuery(minLat, maxLat, minLng, maxLng);
 
-            CachedResult result = new CachedResult();
-            result.setPoints(rawPoints);
-            result.setTimestamp(System.currentTimeMillis());
-            queryCache.put(cacheKey, result);
+        // Ta metoda rzuci RuntimeException jeśli API zawiedzie po MAX_RETRIES
+        List<InfrastructurePoint> rawPoints = queryOverpassApiWithRetry(query);
 
-            List<InfrastructurePoint> filteredPoints = filterPointsNearRoute(rawPoints, routeCoordinates);
+        CachedResult result = new CachedResult();
+        result.setPoints(rawPoints);
+        result.setTimestamp(System.currentTimeMillis());
+        queryCache.put(cacheKey, result);
 
-            log.info("✅ Found {} infrastructure points along the route", filteredPoints.size());
-            return filteredPoints;
-
-        } catch (Exception e) {
-            log.error("❌ Error querying Overpass API: {}", e.getMessage());
-            return new ArrayList<>();
-        }
+        List<InfrastructurePoint> filteredPoints = filterPointsNearRoute(rawPoints, routeCoordinates);
+        log.info("✅ Found {} infrastructure points along the route", filteredPoints.size());
+        return filteredPoints;
     }
 
     private List<InfrastructurePoint> filterPointsNearRoute(
@@ -137,13 +129,10 @@ public class OverpassService {
             List<double[]> routeCoordinates) {
 
         List<InfrastructurePoint> filtered = new ArrayList<>();
-
         for (InfrastructurePoint point : points) {
             boolean isNearRoute = false;
-
             for (double[] routePoint : routeCoordinates) {
                 double distance = point.getDistanceFrom(routePoint[0], routePoint[1]);
-
                 if (distance <= MAX_DISTANCE_FROM_ROUTE_METERS) {
                     isNearRoute = true;
                     break;
@@ -152,23 +141,12 @@ public class OverpassService {
 
             if (isNearRoute) {
                 filtered.add(point);
-                log.debug("✅ {} '{}' znajduje się na trasie ({}m od trasy)",
-                        point.getType().getPolish(), point.getName(),
-                        Math.round(findMinDistanceToRoute(point, routeCoordinates)));
             }
         }
 
         log.info("📊 Filtrowanie: {} -> {} punktów (usunięto {} fałszywych alarmów)",
                 points.size(), filtered.size(), points.size() - filtered.size());
-
         return filtered;
-    }
-
-    private double findMinDistanceToRoute(InfrastructurePoint point, List<double[]> routeCoordinates) {
-        return routeCoordinates.stream()
-                .mapToDouble(coord -> point.getDistanceFrom(coord[0], coord[1]))
-                .min()
-                .orElse(Double.MAX_VALUE);
     }
 
     private String buildOverpassQuery(double minLat, double maxLat, double minLng, double maxLng) {
@@ -194,8 +172,7 @@ public class OverpassService {
     }
 
     private List<InfrastructurePoint> queryOverpassApiWithRetry(String query) {
-        List<InfrastructurePoint> points = new ArrayList<>();
-        int retryDelayMs = 1000;
+        int retryDelayMs = 2000;
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
@@ -205,37 +182,33 @@ public class OverpassService {
                         .encode()
                         .toUri();
 
-                log.debug("📡 Overpass API query (attempt {}/{})", attempt, MAX_RETRIES);
+                log.info("📡 Overpass API query (attempt {}/{})", attempt, MAX_RETRIES);
 
                 Map<String, Object> response = restTemplate.getForObject(uri, Map.class);
 
                 if (response != null && response.containsKey("elements")) {
                     List<Map<String, Object>> elements = (List<Map<String, Object>>) response.get("elements");
-                    points = parseOverpassResponse(elements);
+                    List<InfrastructurePoint> points = parseOverpassResponse(elements);
                     log.info("✅ Overpass API success: {} points found", points.size());
-                    break;
-                } else {
-                    log.warn("⚠️ No elements in Overpass API response");
+                    return points;
                 }
 
             } catch (Exception e) {
                 log.error("❌ Attempt {} failed: {}", attempt, e.getMessage());
-
-                if (attempt == MAX_RETRIES) {
-                    log.error("💥 Max retries reached");
-                    break;
-                }
-
-                try {
-                    Thread.sleep(retryDelayMs * attempt);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
+                if (attempt < MAX_RETRIES) {
+                    try {
+                        Thread.sleep(retryDelayMs * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Przerwano oczekiwanie na API Overpass");
+                    }
                 }
             }
         }
 
-        return points;
+        // FAIL-FAST: Jeśli dotarliśmy tutaj, znaczy że wszystkie próby zawiodły
+        log.error("💥 Max retries reached for Overpass API. Verification failed!");
+        throw new RuntimeException("KRYTYCZNY BŁĄD: Nie można pobrać danych o infrastrukturze z API Overpass. Walidacja przerwana dla bezpieczeństwa.");
     }
 
     private List<InfrastructurePoint> parseOverpassResponse(List<Map<String, Object>> elements) {
@@ -252,21 +225,16 @@ public class OverpassService {
         for (Map<String, Object> element : elements) {
             if ("way".equals(element.get("type"))) {
                 InfrastructurePoint point = parseWayElement(element, nodes);
-                if (point != null) {
-                    points.add(point);
-                }
+                if (point != null) points.add(point);
             }
         }
 
         for (Map<String, Object> element : elements) {
             if ("node".equals(element.get("type"))) {
                 InfrastructurePoint point = parseNodeElement(element);
-                if (point != null) {
-                    points.add(point);
-                }
+                if (point != null) points.add(point);
             }
         }
-
         return points;
     }
 
@@ -275,7 +243,6 @@ public class OverpassService {
         if (tags == null) return null;
 
         InfrastructureType type = null;
-
         if ("yes".equals(tags.get("bridge")) || "bridge".equals(tags.get("man_made"))) {
             type = InfrastructureType.BRIDGE;
         } else if ("yes".equals(tags.get("tunnel")) || "tunnel".equals(tags.get("man_made"))) {
@@ -287,18 +254,13 @@ public class OverpassService {
         if (type == null) return null;
 
         List<?> nodeIdsRaw = (List<?>) element.get("nodes");
-        List<Long> nodeIds = new ArrayList<>();
-        for (Object id : nodeIdsRaw) {
-            nodeIds.add(((Number) id).longValue());
-        }
-
-        if (nodeIds.isEmpty()) return null;
+        if (nodeIdsRaw == null || nodeIdsRaw.isEmpty()) return null;
 
         double sumLat = 0, sumLng = 0;
         int count = 0;
 
-        for (Long nodeId : nodeIds) {
-            Map<String, Object> node = nodes.get(nodeId);
+        for (Object id : nodeIdsRaw) {
+            Map<String, Object> node = nodes.get(((Number) id).longValue());
             if (node != null) {
                 sumLat += ((Number) node.get("lat")).doubleValue();
                 sumLng += ((Number) node.get("lon")).doubleValue();
@@ -308,28 +270,18 @@ public class OverpassService {
 
         if (count == 0) return null;
 
-        double lat = sumLat / count;
-        double lng = sumLng / count;
-
         String name = (String) tags.getOrDefault("name",
                 type.getPolish() + " na " + tags.getOrDefault("ref", "drodze lokalnej"));
 
-        String roadName = (String) tags.get("ref");
-        if (roadName == null) {
-            roadName = (String) tags.get("highway");
-        }
-
+        String roadName = (String) tags.getOrDefault("ref", (String) tags.get("highway"));
         Double maxWeight = parseWeight(tags);
         Double maxHeight = parseHeight(tags);
 
         Map<String, String> stringTags = new HashMap<>();
         tags.forEach((k, v) -> stringTags.put(k, String.valueOf(v)));
 
-        String osmId = "way/" + element.get("id");
-        Integer yearBuilt = parseYear(tags);
-
         return new InfrastructurePoint(
-                type, name, lat, lng, maxWeight, maxHeight, roadName, stringTags, osmId, yearBuilt
+                type, name, sumLat / count, sumLng / count, maxWeight, maxHeight, roadName, stringTags, "way/" + element.get("id"), parseYear(tags)
         );
     }
 
@@ -338,123 +290,64 @@ public class OverpassService {
         if (tags == null) return null;
 
         InfrastructureType type = null;
-        String name = null;
-
-        if ("height_restrictor".equals(tags.get("barrier"))) {
-            type = InfrastructureType.HEIGHT_BARRIER;
-            name = "Ograniczenie wysokości";
-        } else if ("toll_booth".equals(tags.get("amenity"))) {
-            type = InfrastructureType.TOLL_GATE;
-            name = "Bramka opłat";
-        }
+        if ("height_restrictor".equals(tags.get("barrier"))) type = InfrastructureType.HEIGHT_BARRIER;
+        else if ("toll_booth".equals(tags.get("amenity"))) type = InfrastructureType.TOLL_GATE;
 
         if (type == null) return null;
-
-        double lat = ((Number) element.get("lat")).doubleValue();
-        double lng = ((Number) element.get("lon")).doubleValue();
-
-        Double maxHeight = parseHeight(tags);
 
         Map<String, String> stringTags = new HashMap<>();
         tags.forEach((k, v) -> stringTags.put(k, String.valueOf(v)));
 
-        String osmId = "node/" + element.get("id");
-
         return new InfrastructurePoint(
-                type, name, lat, lng, null, maxHeight, null, stringTags, osmId, null
+                type, type.getPolish(), ((Number) element.get("lat")).doubleValue(), ((Number) element.get("lon")).doubleValue(), null, parseHeight(tags), null, stringTags, "node/" + element.get("id"), null
         );
     }
 
     private Double parseWeight(Map<String, Object> tags) {
         String[] weightTags = {"maxweight", "maxweight:signed", "weight_limit", "maxweight:physical"};
-
         for (String tag : weightTags) {
             String value = (String) tags.get(tag);
             if (value != null && !value.trim().isEmpty()) {
                 try {
                     value = value.replaceAll("[^0-9.,]", "").replace(",", ".");
                     double weight = Double.parseDouble(value);
-
-                    if (weight > 500) {
-                        weight = weight / 1000.0;
-                    }
-
-                    return weight;
+                    return weight > 500 ? weight / 1000.0 : weight;
                 } catch (Exception e) {
                     log.debug("Could not parse weight: {}", value);
                 }
             }
         }
-
-        String highway = (String) tags.get("highway");
-        if ("motorway".equals(highway) || "trunk".equals(highway)) {
-            return 60.0;
-        } else if ("primary".equals(highway)) {
-            return 50.0;
-        } else if ("secondary".equals(highway)) {
-            return 40.0;
-        }
-
         return null;
     }
 
     private Double parseHeight(Map<String, Object> tags) {
         String[] heightTags = {"maxheight", "maxheight:physical", "height", "maxheight:signed"};
-
         for (String tag : heightTags) {
             String value = (String) tags.get(tag);
             if (value != null && !value.trim().isEmpty()) {
                 try {
-                    value = value.toLowerCase()
-                            .replace("m", "")
-                            .replace("'", "")
-                            .replace("\"", "")
-                            .replace(",", ".")
-                            .trim();
-
-                    if (value.contains("ft")) {
-                        value = value.replace("ft", "").trim();
-                        double feet = Double.parseDouble(value);
-                        return feet * 0.3048;
-                    }
-
+                    value = value.toLowerCase().replaceAll("[^0-9.,ft'\"]", "").replace(",", ".");
+                    if (value.contains("ft") || value.contains("'")) return Double.parseDouble(value.replaceAll("[^0-9.]", "")) * 0.3048;
                     return Double.parseDouble(value);
                 } catch (Exception e) {
                     log.debug("Could not parse height: {}", value);
                 }
             }
         }
-
-        if ("yes".equals(tags.get("tunnel"))) {
-            String highway = (String) tags.get("highway");
-            if ("motorway".equals(highway) || "trunk".equals(highway)) {
-                return 4.8;
-            }
-            return 4.5;
-        }
-
         return null;
     }
 
     private Integer parseYear(Map<String, Object> tags) {
         String[] yearTags = {"start_date", "year_built", "construction_date"};
-
         for (String tag : yearTags) {
             String value = (String) tags.get(tag);
-            if (value != null && !value.trim().isEmpty()) {
+            if (value != null) {
                 try {
                     String yearStr = value.replaceAll("[^0-9]", "");
-                    if (yearStr.length() >= 4) {
-                        return Integer.parseInt(yearStr.substring(0, 4));
-                    }
-                } catch (Exception e) {
-                    log.debug("Could not parse year: {}", value);
-                }
+                    if (yearStr.length() >= 4) return Integer.parseInt(yearStr.substring(0, 4));
+                } catch (Exception e) { /* skip */ }
             }
         }
-
         return null;
     }
-
-
 }

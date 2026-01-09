@@ -8,6 +8,11 @@ public class CreateTransportSetRequest {
     private Long cargoId;
     private String description;
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NOWE POLE - ID naczepy do przypisania do zestawu transportowego
+    // ═══════════════════════════════════════════════════════════════════════════
+    private Long trailerId;
+
     // Nowe pole - typ transportu
     private String transportMode; // "trailer" lub "self"
 

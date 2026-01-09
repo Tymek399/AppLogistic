@@ -4,8 +4,10 @@ import com.military.applogistic.dto.request.CreateTransportSetRequest;
 import com.military.applogistic.dto.request.CreateVehicleRequest;
 import com.military.applogistic.entity.Vehicle;
 import com.military.applogistic.entity.TransportSet;
+import com.military.applogistic.entity.Trailer;
 import com.military.applogistic.repository.VehicleRepository;
 import com.military.applogistic.repository.TransportSetRepository;
+import com.military.applogistic.repository.TrailerRepository;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,6 +23,10 @@ public class VehicleController {
 
     private final VehicleRepository vehicleRepository;
     private final TransportSetRepository transportSetRepository;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NOWE - Wstrzyknięcie TrailerRepository
+    // ═══════════════════════════════════════════════════════════════════════════
+    private final TrailerRepository trailerRepository;
 
     @GetMapping("/transporters")
     @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
@@ -102,14 +108,33 @@ public class VehicleController {
         return ResponseEntity.ok(sets);
     }
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════════
+     * ZMODYFIKOWANA METODA - Tworzenie zestawu transportowego z obsługą naczepy
+     *
+     * Teraz obsługuje:
+     * - transporterId (ciągnik)
+     * - cargoId (ładunek)
+     * - trailerId (naczepa) - NOWE!
+     * - transportMode / forceSelfDriving
+     * ═══════════════════════════════════════════════════════════════════════════
+     */
     @PostMapping("/transport-sets")
     @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
     public ResponseEntity<TransportSet> createTransportSet(@RequestBody CreateTransportSetRequest request) {
-        log.info("Creating transport set: transporter={}, cargo={}, mode={}",
-                request.getTransporterId(), request.getCargoId(), request.getTransportMode());
+        log.info("════════════════════════════════════════════════════════════");
+        log.info("Creating transport set: transporter={}, cargo={}, trailer={}, mode={}",
+                request.getTransporterId(),
+                request.getCargoId(),
+                request.getTrailerId(),
+                request.getTransportMode());
+        log.info("════════════════════════════════════════════════════════════");
 
+        // Pobierz ciągnik
         Vehicle transporter = vehicleRepository.findById(request.getTransporterId())
                 .orElseThrow(() -> new RuntimeException("Transporter not found"));
+
+        // Pobierz ładunek
         Vehicle cargo = vehicleRepository.findById(request.getCargoId())
                 .orElseThrow(() -> new RuntimeException("Cargo not found"));
 
@@ -118,21 +143,60 @@ public class VehicleController {
         transportSet.setCargo(cargo);
         transportSet.setDescription(request.getDescription());
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // NOWE - Obsługa naczepy
+        // ═══════════════════════════════════════════════════════════════════════
+        if (request.getTrailerId() != null && !request.isForceSelfDriving()) {
+            Trailer trailer = trailerRepository.findById(request.getTrailerId())
+                    .orElseThrow(() -> new RuntimeException("Trailer not found with ID: " + request.getTrailerId()));
+
+            transportSet.setTrailer(trailer);
+            log.info("✅ Przypisano naczepę: {} ({})",
+                    trailer.getRegistrationNumber(),
+                    trailer.getType());
+
+            // Logowanie parametrów naczepy
+            log.info("   Parametry naczepy:");
+            log.info("   - Masa własna: {} kg", trailer.getEmptyWeight());
+            log.info("   - Wysokość bez ładunku: {} m", trailer.getUnloadedHeight());
+            log.info("   - Liczba osi: {}", trailer.getNumberOfAxles());
+            log.info("   - Wymiary (DxSxW): {}m x {}m x {}m",
+                    trailer.getLength(),
+                    trailer.getWidth(),
+                    trailer.getHeight());
+            log.info("   - Max ładowność: {} kg", trailer.getMaxPayload());
+        }
+
         // Ustawienie wymuszenia jazdy na własnych kołach
         if (request.isForceSelfDriving()) {
             if (Boolean.TRUE.equals(cargo.getCanDriveAlone())) {
                 transportSet.setForceSelfDriving(true);
-                log.info("Operator wymusił jazdę na własnych kołach dla: {}", cargo.getModel());
+                transportSet.setTrailer(null); // Brak naczepy przy self-driving
+                log.info("✅ Operator wymusił jazdę na własnych kołach dla: {}", cargo.getModel());
             } else {
-                log.warn("Pojazd {} nie może jechać sam - ignoruję wybór operatora", cargo.getModel());
+                log.warn("⚠️ Pojazd {} nie może jechać sam - ignoruję wybór operatora", cargo.getModel());
                 transportSet.setForceSelfDriving(false);
             }
         }
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // Oblicz parametry zestawu (z uwzględnieniem naczepy jeśli przypisana)
+        // ═══════════════════════════════════════════════════════════════════════
         transportSet.calculateTransportParameters();
 
+        // Logowanie obliczonych parametrów
+        log.info("════════════════════════════════════════════════════════════");
+        log.info("📊 OBLICZONE PARAMETRY ZESTAWU TRANSPORTOWEGO:");
+        log.info("   {}", transportSet.getWeightBreakdown());
+        log.info("   {}", transportSet.getHeightBreakdown());
+        log.info("   {}", transportSet.getAxleBreakdown());
+        log.info("   Długość całkowita: {} cm", transportSet.getTotalLengthCm());
+        log.info("   Szerokość całkowita: {} cm", transportSet.getTotalWidthCm());
+        log.info("   Typ: {}", transportSet.getTrailerType());
+        log.info("════════════════════════════════════════════════════════════");
+
         TransportSet saved = transportSetRepository.save(transportSet);
-        log.info("Transport set created with ID: {} (type: {})",
+        log.info("✅ Transport set created with ID: {} (type: {})",
                 saved.getId(), saved.getTrailerType());
 
         return ResponseEntity.ok(saved);
