@@ -1330,63 +1330,159 @@ function selectTransportMode(mode) {
     document.querySelectorAll('.transport-mode-option').forEach(el => el.classList.remove('selected'));
     document.querySelector(`[data-mode="${mode}"]`).classList.add('selected');
 }
-
+function checkIfCanDriveAlone(cargoId, allCargo) {
+    const cargo = allCargo.find(c => c.id == cargoId);
+    return !!(cargo && cargo.canDriveAlone);
+}
 async function loadVehiclesTab() {
     try {
-        const [transporters, cargo, sets] = await Promise.all([
+        const [transporters, trailers, cargo, sets] = await Promise.all([
             fetch('/api/vehicles/transporters').then(r => r.json()),
+            fetch('/api/trailers').then(r => r.json()),
             fetch('/api/vehicles/cargo').then(r => r.json()),
             fetch('/api/vehicles/transport-sets').then(r => r.json())
         ]);
 
         operatorDashboard.allCargo = cargo;
 
-        document.getElementById('transporter-select').innerHTML = '<option value="">Wybierz...</option>' +
-            transporters.map(t => `<option value="${t.id}">${t.model} (${t.totalWeightKg}kg)</option>`).join('');
+        // CIĘŻARÓWKI
+        document.getElementById('transporter-select').innerHTML = '<option value="">Wybierz ciężarówkę...</option>' +
+            transporters.map(t => `<option value="${t.id}">${t.model} (${t.totalWeightKg}kg, ${t.heightCm}cm)</option>`).join('');
 
-        document.getElementById('cargo-select').innerHTML = '<option value="">Wybierz...</option>' +
+        // NACZEPY
+        const trailerSelect = document.getElementById('trailer-select');
+        if (trailerSelect) {
+            if (trailers.length === 0) {
+                trailerSelect.innerHTML = '<option value="">Brak naczep - dodaj w zakładce "Dodaj Sprzęt"</option>';
+            } else {
+                trailerSelect.innerHTML = '<option value="">Wybierz naczepę...</option>' +
+                    trailers.map(t => {
+                        const details = [
+                            t.type || 'Nieznany typ',
+                            `${t.maxPayload}kg`,
+                            `${t.numberOfAxles || '?'} osi`
+                        ].join(', ');
+                        return `<option value="${t.id}">${t.registrationNumber} (${details})</option>`;
+                    }).join('');
+            }
+        }
+
+        // ŁADUNKI
+        document.getElementById('cargo-select').innerHTML = '<option value="">Wybierz ładunek...</option>' +
             cargo.map(c => `<option value="${c.id}">${c.model} (${c.totalWeightKg}kg, ${c.heightCm}cm)${c.canDriveAlone ? ' 🚗' : ''}</option>`).join('');
 
-        document.getElementById('existing-sets').innerHTML = sets.map(set => `
+        // ISTNIEJĄCE ZESTAWY
+        document.getElementById('existing-sets').innerHTML = sets.length === 0
+            ? '<div class="alert alert-info">Brak zestawów. Utwórz pierwszy zestaw.</div>'
+            : sets.map(set => `
             <div class="card mb-2">
-                <div class="card-body">
-                    <h6>${set.description || 'Zestaw #' + set.id}</h6>
-                    <small>Ciężarówka: ${set.transporter.model}</small><br>
-                    <small>Ładunek: ${set.cargo.model}</small><br>
-                    <small>Typ: ${set.trailerType || 'N/A'}</small><br>
-                    <small>Waga: ${set.totalWeightKg}kg</small><br>
-                    <small>Wysokość: ${set.totalHeightCm}cm</small>
+                <div class="card-body py-2">
+                    <h6 class="mb-1">${set.description || 'Zestaw #' + set.id}</h6>
+                    <small class="d-block text-muted">🚛 ${set.transporter.model}</small>
+                    <small class="d-block text-muted">📦 ${set.cargo.model}</small>
+                    ${set.trailer ? `<small class="d-block text-muted">🚜 ${set.trailer.registrationNumber} (${set.trailer.type})</small>` : ''}
+                    <small class="d-block"><strong>Masa:</strong> ${set.totalWeightKg}kg | <strong>Wys:</strong> ${set.totalHeightCm}cm</small>
                 </div>
             </div>
         `).join('');
 
-        if (operatorDashboard) operatorDashboard.loadTrailers();
+        // LISTA NACZEP W ZAKŁADCE ZESTAWY
+        const vehiclesTrailersList = document.getElementById('vehicles-trailers-list');
+        if (vehiclesTrailersList) {
+            if (trailers.length === 0) {
+                vehiclesTrailersList.innerHTML = `
+                    <div class="alert alert-secondary text-center">
+                        <p class="mb-2">🚛 Brak zarejestrowanych naczep</p>
+                        <small>Dodaj naczepę w zakładce "Dodaj Sprzęt"</small>
+                    </div>
+                `;
+            } else {
+                vehiclesTrailersList.innerHTML = trailers.map(trailer => `
+                    <div class="card mb-2 border-info">
+                        <div class="card-body py-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <strong class="text-primary">${trailer.registrationNumber}</strong>
+                                <span class="badge bg-info text-dark">${trailer.type || 'N/A'}</span>
+                            </div>
+                            <small class="d-block text-muted">📏 ${trailer.maxPayload}kg | ${trailer.numberOfAxles || '?'} osi</small>
+                            <small class="d-block text-muted">📐 ${trailer.length}m × ${trailer.width}m × ${trailer.height}m</small>
+                            <small class="d-block text-muted">⚖️ Masa własna: ${trailer.emptyWeight || '?'}kg</small>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        console.log('✅ Załadowano dane do sekcji Zestawy Transportowe:', {
+            transporters: transporters.length,
+            trailers: trailers.length,
+            cargo: cargo.length,
+            sets: sets.length
+        });
 
     } catch (error) {
-        console.error('Error loading vehicles:', error);
+        console.error('❌ Błąd ładowania danych zestawów:', error);
+        operatorDashboard?.showError('Błąd ładowania danych: ' + error.message);
     }
 }
 
 async function handleVehicleFormSubmit(e) {
     e.preventDefault();
+
+    const button = e.submitter;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Tworzenie...';
+
     try {
-        const trailerType = document.getElementById('transport-mode')?.value || 'trailer';
+        const transporterId = document.getElementById('transporter-select').value;
+        const trailerId = document.getElementById('trailer-select').value;
+        const cargoId = document.getElementById('cargo-select').value;
+        const description = document.getElementById('set-description').value.trim();
+        const transportMode = document.getElementById('transport-mode')?.value || 'trailer';
+
+        if (!transporterId || !cargoId) {
+            throw new Error('Musisz wybrać ciężarówkę i ładunek');
+        }
+
+        if (!trailerId && transportMode !== 'self') {
+            throw new Error('Musisz wybrać naczepę lub ustawić tryb "Na własnych kołach"');
+        }
+
+        const payload = {
+            transporterId: parseInt(transporterId),
+            cargoId: parseInt(cargoId),
+            description: description || undefined,
+            transportMode: transportMode
+        };
+
+        if (trailerId && transportMode !== 'self') {
+            payload.trailerId = parseInt(trailerId);
+        }
+
+        console.log('📤 Wysyłanie zestawu:', payload);
 
         const response = await fetch('/api/vehicles/transport-sets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                transporterId: document.getElementById('transporter-select').value,
-                cargoId: document.getElementById('cargo-select').value,
-                trailerType: trailerType
-            })
+            body: JSON.stringify(payload)
         });
-        if (!response.ok) throw new Error('Failed to create transport set');
-        operatorDashboard.showSuccess('Zestaw transportowy utworzony');
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.message || `Błąd ${response.status}`);
+        }
+
+        operatorDashboard.showSuccess('✅ Zestaw transportowy utworzony!');
+        e.target.reset();
         loadVehiclesTab();
         operatorDashboard.loadTransportSets();
+
     } catch (error) {
+        console.error('❌ Błąd tworzenia zestawu:', error);
         operatorDashboard.showError('Błąd: ' + error.message);
+    } finally {
+        button.disabled = false;
+        button.innerHTML = 'Utwórz';
     }
 }
 

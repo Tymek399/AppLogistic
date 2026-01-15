@@ -376,7 +376,8 @@
     <!-- ═══════════════════════════════════════════════════════════════════════════ -->
     <div id="vehicles-section" style="display: none;">
         <div class="row">
-            <div class="col-md-6">
+            <!-- Formularz tworzenia zestawu -->
+            <div class="col-md-4">
                 <div class="card shadow">
                     <div class="card-header bg-primary text-white">
                         <h5 class="mb-0">Utwórz Zestaw</h5>
@@ -390,11 +391,10 @@
                                 </select>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Naczepa (opcjonalnie)</label>
+                                <label class="form-label">Naczepa</label>
                                 <select id="trailer-select" class="form-select">
-                                    <option value="">Wybierz naczepę...</option>
+                                    <option value="">Ładowanie...</option>
                                 </select>
-                                <small class="form-text text-muted">Dodaj naczepę do zestawu, jeśli jest wymagana.</small>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Ładunek</label>
@@ -405,7 +405,6 @@
 
                             <div class="transport-mode-selector" id="transport-mode-container" style="display:none;">
                                 <label class="form-label"><strong>Typ transportu:</strong></label>
-
                                 <div class="transport-mode-option" data-mode="trailer" onclick="selectTransportMode('trailer')">
                                     <span class="transport-mode-icon">🚛</span>
                                     <div style="display: inline-block; vertical-align: top;">
@@ -413,7 +412,6 @@
                                         <small>Oszczędność zużycia pojazdu, bezpieczny transport na długie dystanse</small>
                                     </div>
                                 </div>
-
                                 <div class="transport-mode-option" data-mode="self" onclick="selectTransportMode('self')">
                                     <span class="transport-mode-icon">🚗</span>
                                     <div style="display: inline-block; vertical-align: top;">
@@ -421,7 +419,6 @@
                                         <small>Pojazd jedzie samodzielnie, szybszy dojazd na krótkie dystanse</small>
                                     </div>
                                 </div>
-
                                 <input type="hidden" id="transport-mode" value="trailer">
                             </div>
 
@@ -436,7 +433,8 @@
                 </div>
             </div>
 
-            <div class="col-md-6">
+            <!-- Istniejące zestawy -->
+            <div class="col-md-4">
                 <div class="card shadow">
                     <div class="card-header bg-secondary text-white">
                         <h5 class="mb-0">Istniejące Zestawy</h5>
@@ -452,7 +450,6 @@
             </div>
         </div>
     </div>
-
     <!-- ═══════════════════════════════════════════════════════════════════════════ -->
     <!-- SEKCJA: DODAJ SPRZĘT -->
     <!-- ═══════════════════════════════════════════════════════════════════════════ -->
@@ -664,43 +661,6 @@
                             <button type="submit" class="btn btn-info w-100 mt-3">
                                 <strong>Dodaj Naczepę</strong>
                             </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Panel tworzenia zestawu transportowego -->
-            <div class="col-md-4">
-                <div class="card shadow">
-                    <div class="card-header bg-primary text-white">
-                        <h5 class="mb-0">🚚 Utwórz Zestaw Transportowy</h5>
-                    </div>
-                    <div class="card-body">
-                        <form id="add-transport-set-form">
-                            <div class="mb-3">
-                                <label class="form-label">Ciągnik <span class="text-danger">*</span></label>
-                                <select id="transporter-select" class="form-select" required>
-                                    <option value="">Wybierz ciągnik...</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Ładunek <span class="text-danger">*</span></label>
-                                <select id="cargo-select" class="form-select" required>
-                                    <option value="">Wybierz ładunek...</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Naczepa <span class="text-danger">*</span></label>
-                                <select id="transport-set-trailer-select" class="form-select" required>
-                                    <option value="">Wybierz naczepę...</option>
-                                </select>
-                                <small class="text-muted">Parametry naczepy zostaną użyte do walidacji trasy</small>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Opis zestawu</label>
-                                <input type="text" id="set-description" class="form-control" placeholder="np. Transport Leopard 2A5">
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100">Utwórz Zestaw</button>
                         </form>
                     </div>
                 </div>
